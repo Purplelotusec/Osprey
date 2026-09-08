@@ -1,0 +1,6 @@
+# comment lines and blanks should be skipped
+
+requests==2.31.0
+Django==4.2.7
+some-unpinned-package>=1.0
+-e git+https://example.com/foo.git#egg=foo

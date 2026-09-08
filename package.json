@@ -1,0 +1,34 @@
+{
+  "name": "cra-guard-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SBOM generation, signing, storage + CISA KEV polling, cross-checking, and alerting",
+  "type": "module",
+  "bin": {
+    "cra-sbom": "./dist/cli/generate-sbom.js",
+    "cra-kev": "./dist/cli/kev-check.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "sbom": "tsx cli/generate-sbom.ts",
+    "kev": "tsx cli/kev-check.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "files": ["dist", "README.md"],
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.658.0",
+    "zod": "^3.23.8",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "tsx": "^4.19.0",
+    "vitest": "^2.1.0",
+    "@types/node": "^22.5.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
