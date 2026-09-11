@@ -2,10 +2,7 @@
 
 Two standalone, independently sellable pieces:
 
-1. **SBOM generation + signing + storage** — generates a real CycloneDX 1.5 SBOM
-   from an npm or Python project's lockfile, signs it with Ed25519 (DSSE envelope,
-   the same primitive Sigstore/cosign use), and optionally uploads both to S3-compatible storage.
-2. **KEV poller + cross-check + alerting** — pulls the live CISA KEV feed, cross-checks
+1. **KEV poller + cross-check + alerting** — pulls the live CISA KEV feed, cross-checks
    it against an SBOM's components with confidence tiering, and alerts via Slack webhook
    or console output. Exits non-zero on high-confidence matches for CI gating.
 
@@ -14,6 +11,7 @@ Everything below has been run and verified in this environment — not just writ
 ## What's real vs. what's a known limitation
 
 **Works today:**
+
 - npm: full `package-lock.json` (v1, v2, v3) parsing — direct vs. transitive deps, scoped packages, dedup
 - Python: `requirements.txt` with exact pins (`pkg==1.2.3`) — ranges/VCS lines are explicitly skipped and reported, never guessed
 - Ed25519 signing via DSSE pre-authentication encoding — tamper detection verified (changing one byte of the SBOM after signing fails verification; signing with the wrong key fails verification)
