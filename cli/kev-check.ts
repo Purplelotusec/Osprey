@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { readFileSync, existsSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve, join } from "node:path";
 import { homedir } from "node:os";
 import { pollKev } from "../src/vulnerability/kev.js";
 import { crossCheck } from "../src/correlation/matcher.js";
 import { sendCrossCheckAlert, printCrossCheckResults } from "../src/alerting/webhook.js";
 import { generateSbom } from "../src/sbom/generate/index.js";
+import { runKevCheck } from "../src/vulnerability/check.js";
 import type { NormalizedComponent } from "../src/sbom/types.js";
+import type { SboimResult } from "../src/vulnerability/types.js";
 
 const program = new Command();
 
@@ -19,39 +21,54 @@ program
   .option("--cache <file>", "KEV cache file, used as fallback on fetch failure", join(homedir(), ".cra-guard", "kev-cache.json"))
   .option("--offline", "use only the cached KEV snapshot, no network call", false)
   .option("--webhook <url>", "Slack-compatible webhook URL to alert on matches")
+  .option("--result <file>", "write a structured machine-readable SBOIM result JSON file")
   .option("--fail-on-high", "exit non-zero if any high-confidence match is found (for CI gating)", false)
   .action(async (options) => {
-    try {
-      const components = options.sbom
-        ? loadComponentsFromSbomFile(resolve(options.sbom))
-        : generateSbom({ projectDir: resolve(options.path) }).sbom.components;
-
-      const subjectName = options.sbom ? options.sbom : resolve(options.path);
-
-      console.log(`Polling CISA KEV...`);
-      const snapshot = await pollKev({ cachePath: resolve(options.cache), offline: options.offline });
-      console.log(`Loaded ${snapshot.entries.length} KEV entries (as of ${snapshot.dateReleased ?? snapshot.fetchedAt})`);
-
-      console.log(`Cross-checking ${components.length} components...`);
-      const matches = crossCheck(components, snapshot.entries);
-
-      printCrossCheckResults(matches, subjectName);
-
-      if (options.webhook && matches.length > 0) {
+    const resultPath = options.result ? resolve(options.result) : undefined;
+    const subjectName = options.sbom ? options.sbom : resolve(options.path);
+    const result = await runKevCheck({
+      subjectName,
+      webhookUrl: options.webhook,
+      failOnHigh: options.failOnHigh,
+      generateComponents: () => {
+        const components = options.sbom
+          ? loadComponentsFromSbomFile(resolve(options.sbom))
+          : generateSbom({ projectDir: resolve(options.path) }).sbom.components;
+        return components;
+      },
+      pollKev: async () => {
+        console.log(`Polling CISA KEV...`);
+        const snapshot = await pollKev({ cachePath: resolve(options.cache), offline: options.offline });
+        console.log(`Loaded ${snapshot.entries.length} KEV entries (as of ${snapshot.dateReleased ?? snapshot.fetchedAt})`);
+        return snapshot;
+      },
+      crossCheck: (components, entries) => {
+        console.log(`Cross-checking ${components.length} components...`);
+        const matches = crossCheck(components, entries);
+        printCrossCheckResults(matches, subjectName);
+        return matches;
+      },
+      sendAlert: async (matches) => {
         await sendCrossCheckAlert(matches, { webhookUrl: options.webhook, subjectName });
         console.log(`Alert sent to webhook.`);
-      }
+      },
+    });
 
-      const highConfidenceCount = matches.filter((m) => m.confidence === "high").length;
-      if (options.failOnHigh && highConfidenceCount > 0) {
-        console.error(`\n${highConfidenceCount} high-confidence match(es) — failing per --fail-on-high.`);
-        process.exit(1);
-      }
-    } catch (err) {
-      console.error(`Error: ${(err as Error).message}`);
-      process.exit(1);
+    writeResult(resultPath, result);
+    if (result.status === "failed" && result.highConfidenceMatchCount > 0 && options.failOnHigh) {
+      console.error(`\n${result.highConfidenceMatchCount} high-confidence match(es) — failing per --fail-on-high.`);
+    }
+    if (result.status === "failed") {
+      for (const error of result.errors) console.error(`Error: ${error}`);
+      process.exitCode = 1;
     }
   });
+
+  function writeResult(path: string | undefined, result: SboimResult): void {
+    if (!path) return;
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(result, null, 2)}\n`);
+  }
 
 program.parse();
 

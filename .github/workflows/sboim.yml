@@ -1,0 +1,89 @@
+name: SBOIM security scan
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  sboim:
+    name: Generate SBOM and check CISA KEV
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Generate SBOM
+        run: npm run sbom -- --path . --output sbom.json
+
+      - name: Check CISA KEV
+        id: kev
+        shell: bash
+        run: |
+          set +e
+          npm run kev -- --sbom sbom.json --result sboim-result.json --cache "$RUNNER_TEMP/kev-cache.json" --fail-on-high 2>&1 | tee kev-check.log
+          kev_exit=${PIPESTATUS[0]}
+          set -e
+
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          const result = JSON.parse(fs.readFileSync("sboim-result.json", "utf8"));
+          const errors = result.errors ?? [];
+          const warnings = result.warnings ?? [];
+          const stageSummary = Object.entries(result.stages ?? {})
+            .map(([stage, details]) => `- **${stage}:** ${details.status}`)
+            .join("\n");
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
+            "## SBOIM security scan",
+            "",
+            `- **Overall pipeline status:** ${result.status}`,
+            `- **SBOM components:** ${result.sbomComponentCount}`,
+            `- **KEV matches:** ${result.matches.length}`,
+            `- **High-confidence matches:** ${result.highConfidenceMatchCount}`,
+            `- **Warnings:** ${warnings.length}`,
+            `- **Errors:** ${errors.length}`,
+            "",
+            "### Pipeline stages",
+            "",
+            stageSummary,
+            "",
+            warnings.length ? "### Warnings\n\n" + warnings.map((line) => `- ${line}`).join("\n") : "",
+            errors.length ? "### Errors\n\n" + errors.map((line) => `- ${line}`).join("\n") : "",
+            "",
+          ].filter(Boolean).join("\n") + "\n");
+          NODE
+
+          exit "$kev_exit"
+
+      - name: Upload SBOIM results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sboim-results-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            sbom.json
+            sbom.json.dsse.json
+            sboim-result.json
+            kev-check.log

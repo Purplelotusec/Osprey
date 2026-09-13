@@ -39,6 +39,20 @@ npm run kev -- --path . --webhook https://hooks.slack.com/services/... --fail-on
 npm run kev -- --sbom sbom.json --offline --cache ~/.cra-guard/kev-cache.json
 ```
 
+The KEV CLI can also write a structured result for CI systems and downstream
+automation. It includes the SBOM component count, KEV snapshot metadata, full
+match details, warnings/errors, and status for each pipeline stage:
+
+```bash
+npm run kev -- --sbom sbom.json --result sboim-result.json --fail-on-high
+```
+
+The result schema is versioned as `schemaVersion: "1.0"`. Signing and storage
+are currently reported as `skipped`; they can be enabled later when secure CI
+credentials and key management are configured. Each stage includes a `status`
+and may include an optional `reason` explaining a skipped or failed stage;
+existing consumers that only read `status` remain compatible.
+
 The `--` separates npm's own flags from the CLI's — everything after it goes to the tool.
 
 ### Global install — real `cra-sbom` / `cra-kev` commands, anywhere on your machine
@@ -65,9 +79,9 @@ Run the test suite (works either way):
 npm test
 ```
 
-17 tests, all passing. `npm audit` will flag a handful of vulnerabilities in `vitest`'s dev-dependency chain (an `esbuild` dev-server issue) — these are test-runner-only and don't affect the `cra-sbom`/`cra-kev` binaries themselves, which depend only on `commander`, `zod`, and `@aws-sdk/client-s3`.
+23 tests, all passing. `npm audit` will flag a handful of vulnerabilities in `vitest`'s dev-dependency chain (an `esbuild` dev-server issue) — these are test-runner-only and don't affect the `cra-sbom`/`cra-kev` binaries themselves, which depend only on `commander`, `zod`, and `@aws-sdk/client-s3`.
 
-17 tests, all passing as of this build: npm/python generation correctness, signing round-trip
+23 tests, all passing as of this build: npm/python generation correctness, signing round-trip
 + tamper detection + wrong-key rejection, and cross-check confidence tiering.
 
 ## Layout
