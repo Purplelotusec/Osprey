@@ -58,4 +58,34 @@ describe("KEV cross-check matcher", () => {
     );
     expect(matches).toHaveLength(2);
   });
+
+  it("does not match @aws-sdk/core to WordPress Core or Drupal Core", () => {
+    const component: NormalizedComponent = {
+      purl: "pkg:npm/%40aws-sdk/core@3.977.9",
+      namespace: "@aws-sdk",
+      name: "core",
+      version: "3.977.9",
+    };
+    const entries = [
+      kevEntry({ vendorProject: "WordPress", product: "Core" }),
+      kevEntry({ vendorProject: "Drupal", product: "Core" }),
+    ];
+
+    expect(crossCheck([component], entries)).toHaveLength(0);
+  });
+
+  it("does not match @smithy/core to WordPress Core or Drupal Core", () => {
+    const component: NormalizedComponent = {
+      purl: "pkg:npm/%40smithy/core@3.33.3",
+      namespace: "@smithy",
+      name: "core",
+      version: "3.33.3",
+    };
+    const entries = [
+      kevEntry({ vendorProject: "WordPress", product: "Core" }),
+      kevEntry({ vendorProject: "Drupal", product: "Core" }),
+    ];
+
+    expect(crossCheck([component], entries)).toHaveLength(0);
+  });
 });
