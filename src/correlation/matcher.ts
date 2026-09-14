@@ -44,21 +44,49 @@ function evaluateMatch(component: NormalizedComponent, entry: KevEntry): CrossCh
   const componentName = component.name.toLowerCase();
   const productName = entry.product.toLowerCase();
   const vendorName = entry.vendorProject.toLowerCase();
+  const parsedPurl = component.purl ? parsePurl(component.purl) : null;
 
   const nameMatchesProduct = componentName === productName;
   const nameMatchesVendor = component.vendor?.toLowerCase() === vendorName;
 
   if (!nameMatchesProduct && !nameMatchesVendor) return null;
 
+  // A scoped npm package such as @aws-sdk/core is not identified by "core"
+  // alone. Reject generic scoped-name matches unless the KEV vendor also
+  // identifies the package namespace, rather than turning them into false
+  // positives for products such as WordPress Core.
+  if (
+    nameMatchesProduct &&
+    parsedPurl?.type === "npm" &&
+    parsedPurl.namespace &&
+    isGenericPackageName(componentName) &&
+    !namespaceMatchesVendor(parsedPurl.namespace, vendorName)
+  ) {
+    return null;
+  }
+
   // "High" confidence requires a PURL-backed identity (came from an actual
-  // lockfile, not guesswork) AND the exact product-name match, not just
-  // the looser vendor match.
-  const confidence: MatchConfidence = component.purl && nameMatchesProduct ? "high" : "low";
+  // lockfile, not guesswork), the exact product-name match, and a package
+  // identity strong enough to distinguish scoped generic names.
+  const strongPackageIdentity =
+    Boolean(component.purl) &&
+    nameMatchesProduct &&
+    (!parsedPurl || !isGenericPackageName(componentName) || !parsedPurl.namespace || namespaceMatchesVendor(parsedPurl.namespace, vendorName));
+  const confidence: MatchConfidence = strongPackageIdentity ? "high" : "low";
 
   return {
     component,
     kevEntry: entry,
     confidence,
-    matchedOn: component.purl && nameMatchesProduct ? "purl_ecosystem_name" : "vendor_product_name",
+    matchedOn: strongPackageIdentity ? "purl_ecosystem_name" : "vendor_product_name",
   };
+}
+
+function isGenericPackageName(name: string): boolean {
+  return new Set(["core"]).has(name);
+}
+
+function namespaceMatchesVendor(namespace: string, vendor: string): boolean {
+  const normalizedNamespace = namespace.replace(/^@/, "").toLowerCase();
+  return vendor.includes(normalizedNamespace) || normalizedNamespace.includes(vendor);
 }

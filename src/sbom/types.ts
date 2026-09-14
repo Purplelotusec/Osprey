@@ -30,6 +30,12 @@ export interface SbomRecord {
   signatureEnvelope?: SignatureEnvelope;
 }
 
+export type {
+  SboimStageResult as PipelineStageResult,
+  SboimStageStatus as PipelineStageStatus,
+  SboimStages as PipelineStages,
+} from "../pipeline/types.js";
+
 export interface SignatureEnvelope {
   payloadType: string;
   payloadSha256: string;

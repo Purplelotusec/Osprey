@@ -13,6 +13,7 @@
     "prepare": "npm run build",
     "sbom": "tsx cli/generate-sbom.ts",
     "kev": "tsx cli/kev-check.ts",
+    "report": "tsx cli/report-sboim.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -20,13 +21,15 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.658.0",
     "zod": "^3.23.8",
-    "commander": "^12.1.0"
+    "commander": "^12.1.0",
+    "semver": "^7.8.5"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
     "tsx": "^4.19.0",
     "vitest": "^2.1.0",
-    "@types/node": "^22.5.0"
+    "@types/node": "^22.5.0",
+    "@types/semver": "^7.8.0"
   },
   "engines": {
     "node": ">=20.0.0"

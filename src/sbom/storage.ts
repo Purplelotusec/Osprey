@@ -13,6 +13,7 @@ let client: S3Client | null = null;
 let activeConfig: StorageConfig | null = null;
 
 function getClient(config: StorageConfig): S3Client {
+  validateStorageEndpoint(config.endpoint);
   if (client && activeConfig === config) return client;
   client = new S3Client({
     endpoint: config.endpoint,
@@ -22,6 +23,22 @@ function getClient(config: StorageConfig): S3Client {
   });
   activeConfig = config;
   return client;
+}
+
+export function validateStorageEndpoint(endpoint: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(endpoint);
+  } catch {
+    throw new Error("S3_ENDPOINT must be a valid URL");
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("S3_ENDPOINT must not contain embedded credentials");
+  }
+  const loopback = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1";
+  if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) {
+    throw new Error("S3_ENDPOINT must use HTTPS (HTTP is allowed only for loopback local development)");
+  }
 }
 
 export function sbomStorageKey(subjectName: string, sha256: string): string {

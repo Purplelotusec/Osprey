@@ -1,0 +1,99 @@
+name: SBOIM security scan
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  sboim:
+    name: Generate SBOM and check CISA KEV
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Generate SBOM
+        continue-on-error: true
+        run: npm run sbom -- --path . --output sbom.json --pipeline-result sboim-pipeline.json
+
+      - name: Check CISA KEV
+        id: kev
+        shell: bash
+        run: |
+          set +e
+          npm run kev -- --sbom sbom.json --pipeline-result sboim-pipeline.json --result sboim-result.json --cache "$RUNNER_TEMP/kev-cache.json" --fail-on-high 2>&1 | tee kev-check.log
+          kev_exit=${PIPESTATUS[0]}
+          set -e
+          exit "$kev_exit"
+
+      - name: Render SBOIM security report
+        if: always()
+        run: |
+          if [ ! -f sboim-result.json ]; then
+            {
+              echo "# SBOIM Security Scan"
+              echo
+              echo "## Overall status: FAIL"
+              echo
+              echo "No structured SBOIM result was produced. Review the preceding step logs."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          npm run report -- --result sboim-result.json --summary sboim-summary.md --sarif sboim.sarif --annotations
+
+      - name: Upload SBOIM results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sboim-results-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            sbom.json
+            sbom.json.dsse.json
+            sboim-pipeline.json
+            sboim-result.json
+            sboim-summary.md
+            sboim.sarif
+            kev-check.log
+
+  upload-sarif:
+    name: Upload SBOIM SARIF
+    if: ${{ always() && github.event_name != 'pull_request' }}
+    needs: sboim
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Download SBOIM artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: sboim-results-${{ github.run_id }}
+
+      - name: Upload SBOIM SARIF
+        if: hashFiles('sboim.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: sboim.sarif
+          category: sboim

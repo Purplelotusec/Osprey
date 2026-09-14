@@ -18,12 +18,16 @@ Everything below has been run and verified in this environment — not just writ
 - CISA KEV polling with schema validation (Zod) and local caching so a network hiccup doesn't silently report "no vulnerabilities"
 - Cross-check with two confidence tiers — `high` (PURL-backed exact product match) vs `low` (name/vendor match only) — because CISA KEV entries are free-text vendor/product names, not machine-precise CPE ranges. See `src/correlation/matcher.ts` for why this distinction exists and matters for any downstream automation (e.g. auto-starting a regulatory clock — don't, on `low` confidence).
 - Slack-compatible webhook alerting, batched into one message per run, high/low separated
+- npm version intelligence using OSV advisories, with authoritative affected/not-affected/unknown status
+- GitHub Actions reporting from the structured result: job summary, escaped annotations, and SARIF output
 
 **Known limitations, stated honestly:**
 - No yarn.lock / pnpm-lock.yaml / poetry.lock / go.sum / Cargo.lock generators yet — npm and pinned-pip only
 - CPE matching not implemented — KEV's free-text fields are the only signal; an NVD/OSV-backed provider with real affected-version ranges would upgrade the `low` tier to something more precise
 - Signing is local-key Ed25519, not full Sigstore keyless/transparency-log — same crypto primitive, less infrastructure. Upgrading to cosign's keyless flow later doesn't require changing the envelope shape.
 - The CISA feed itself couldn't be hit from this sandbox (network allowlist blocks `cisa.gov` here) — poller logic was verified end-to-end against a synthetic snapshot in the exact response shape instead. It will hit the real feed with normal internet access (Render, your own machine, CI).
+- Version intelligence currently supports npm packages through OSV. CISA KEV supplies the `known_exploited` exploitation signal; OSV supplies affected-version evidence. `unknown` means the version could not be established or advisory evidence was unavailable, and is never treated as affected.
+- Network requests use bounded timeouts and response sizes. S3 endpoints must use HTTPS, except for loopback-only local development. Malformed external JSON is rejected rather than treated as an empty or safe result.
 
 ## Usage
 
@@ -38,6 +42,27 @@ npm run sbom -- --path . --output sbom.json --sign --generate-key
 npm run kev -- --path . --webhook https://hooks.slack.com/services/... --fail-on-high
 npm run kev -- --sbom sbom.json --offline --cache ~/.cra-guard/kev-cache.json
 ```
+
+The KEV CLI can also write a structured result for CI systems and downstream
+automation. It includes the SBOM component count, KEV snapshot metadata, full
+match details, warnings/errors, and status for each pipeline stage:
+
+```bash
+npm run kev -- --sbom sbom.json --result sboim-result.json --fail-on-high
+```
+
+The result schema is versioned as `schemaVersion: "1.0"`. Signing and storage
+are currently reported as `skipped`; they can be enabled later when secure CI
+credentials and key management are configured. Each stage includes a `status`
+and may include an optional `reason` explaining a skipped or failed stage;
+existing consumers that only read `status` remain compatible.
+
+Version-enriched findings add `identityConfidence`, `versionStatus`,
+`exploitationStatus`, and `advisoryIds`. `versionStatus` is `affected` only
+when OSV evidence covers the installed npm version, `not_affected` when the
+available evidence excludes it, and `unknown` when the version or evidence
+cannot be evaluated. `exploitationStatus: "known_exploited"` is independent
+and comes from CISA KEV, not from OSV.
 
 The `--` separates npm's own flags from the CLI's — everything after it goes to the tool.
 
@@ -65,10 +90,10 @@ Run the test suite (works either way):
 npm test
 ```
 
-17 tests, all passing. `npm audit` will flag a handful of vulnerabilities in `vitest`'s dev-dependency chain (an `esbuild` dev-server issue) — these are test-runner-only and don't affect the `cra-sbom`/`cra-kev` binaries themselves, which depend only on `commander`, `zod`, and `@aws-sdk/client-s3`.
+49 tests, all passing. `npm audit` will flag a handful of vulnerabilities in `vitest`'s dev-dependency chain (an `esbuild` dev-server issue) — these are test-runner-only and don't affect the `cra-sbom`/`cra-kev` binaries themselves, which depend only on `commander`, `zod`, `semver`, and `@aws-sdk/client-s3`.
 
-17 tests, all passing as of this build: npm/python generation correctness, signing round-trip
-+ tamper detection + wrong-key rejection, and cross-check confidence tiering.
+49 tests, all passing as of this build: npm/python generation correctness, signing round-trip
++ tamper detection + wrong-key rejection, cross-check confidence tiering, npm/OSV version evaluation, and reporting.
 
 ## Layout
 
@@ -88,7 +113,7 @@ src/alerting/
 cli/
   generate-sbom.ts
   kev-check.ts
-tests/            17 passing tests, real fixtures
+tests/            49 passing tests, real fixtures
 ```
 
 ## Environment variables (only needed for `--store`)
@@ -96,3 +121,8 @@ tests/            17 passing tests, real fixtures
 ```
 S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_FORCE_PATH_STYLE
 ```
+
+`npm audit` currently reports vulnerabilities in the Vitest/Vite development-only
+test runner chain. Production runtime dependencies are not affected. The
+available remediation requires a breaking Vitest major upgrade, so it is not
+applied automatically during this audit.
