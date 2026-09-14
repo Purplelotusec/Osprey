@@ -19,6 +19,7 @@ Everything below has been run and verified in this environment — not just writ
 - Cross-check with two confidence tiers — `high` (PURL-backed exact product match) vs `low` (name/vendor match only) — because CISA KEV entries are free-text vendor/product names, not machine-precise CPE ranges. See `src/correlation/matcher.ts` for why this distinction exists and matters for any downstream automation (e.g. auto-starting a regulatory clock — don't, on `low` confidence).
 - Slack-compatible webhook alerting, batched into one message per run, high/low separated
 - npm version intelligence using OSV advisories, with authoritative affected/not-affected/unknown status
+- GitHub Actions reporting from the structured result: job summary, escaped annotations, and SARIF output
 
 **Known limitations, stated honestly:**
 - No yarn.lock / pnpm-lock.yaml / poetry.lock / go.sum / Cargo.lock generators yet — npm and pinned-pip only
@@ -88,10 +89,10 @@ Run the test suite (works either way):
 npm test
 ```
 
-44 tests, all passing. `npm audit` will flag a handful of vulnerabilities in `vitest`'s dev-dependency chain (an `esbuild` dev-server issue) — these are test-runner-only and don't affect the `cra-sbom`/`cra-kev` binaries themselves, which depend only on `commander`, `zod`, `semver`, and `@aws-sdk/client-s3`.
+49 tests, all passing. `npm audit` will flag a handful of vulnerabilities in `vitest`'s dev-dependency chain (an `esbuild` dev-server issue) — these are test-runner-only and don't affect the `cra-sbom`/`cra-kev` binaries themselves, which depend only on `commander`, `zod`, `semver`, and `@aws-sdk/client-s3`.
 
-44 tests, all passing as of this build: npm/python generation correctness, signing round-trip
-+ tamper detection + wrong-key rejection, cross-check confidence tiering, and npm/OSV version evaluation.
+49 tests, all passing as of this build: npm/python generation correctness, signing round-trip
++ tamper detection + wrong-key rejection, cross-check confidence tiering, npm/OSV version evaluation, and reporting.
 
 ## Layout
 
@@ -111,7 +112,7 @@ src/alerting/
 cli/
   generate-sbom.ts
   kev-check.ts
-tests/            44 passing tests, real fixtures
+tests/            49 passing tests, real fixtures
 ```
 
 ## Environment variables (only needed for `--store`)

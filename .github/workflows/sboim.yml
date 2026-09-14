@@ -44,37 +44,22 @@ jobs:
           npm run kev -- --sbom sbom.json --pipeline-result sboim-pipeline.json --result sboim-result.json --cache "$RUNNER_TEMP/kev-cache.json" --fail-on-high 2>&1 | tee kev-check.log
           kev_exit=${PIPESTATUS[0]}
           set -e
-
-          node <<'NODE'
-          const fs = require("node:fs");
-
-          const result = JSON.parse(fs.readFileSync("sboim-result.json", "utf8"));
-          const errors = result.errors ?? [];
-          const warnings = result.warnings ?? [];
-          const stageSummary = Object.entries(result.stages ?? {})
-            .map(([stage, details]) => `- **${stage}:** ${details.status}`)
-            .join("\n");
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
-            "## SBOIM security scan",
-            "",
-            `- **Overall pipeline status:** ${result.status}`,
-            `- **SBOM components:** ${result.sbomComponentCount}`,
-            `- **KEV matches:** ${result.matches.length}`,
-            `- **High-confidence matches:** ${result.highConfidenceMatchCount}`,
-            `- **Warnings:** ${warnings.length}`,
-            `- **Errors:** ${errors.length}`,
-            "",
-            "### Pipeline stages",
-            "",
-            stageSummary,
-            "",
-            warnings.length ? "### Warnings\n\n" + warnings.map((line) => `- ${line}`).join("\n") : "",
-            errors.length ? "### Errors\n\n" + errors.map((line) => `- ${line}`).join("\n") : "",
-            "",
-          ].filter(Boolean).join("\n") + "\n");
-          NODE
-
           exit "$kev_exit"
+
+      - name: Render SBOIM security report
+        if: always()
+        run: |
+          if [ ! -f sboim-result.json ]; then
+            {
+              echo "# SBOIM Security Scan"
+              echo
+              echo "## Overall status: FAIL"
+              echo
+              echo "No structured SBOIM result was produced. Review the preceding step logs."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          npm run report -- --result sboim-result.json --summary sboim-summary.md --sarif sboim.sarif --annotations
 
       - name: Upload SBOIM results
         if: always()
@@ -88,4 +73,27 @@ jobs:
             sbom.json.dsse.json
             sboim-pipeline.json
             sboim-result.json
+            sboim-summary.md
+            sboim.sarif
             kev-check.log
+
+  upload-sarif:
+    name: Upload SBOIM SARIF
+    if: ${{ always() && github.event_name != 'pull_request' }}
+    needs: sboim
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Download SBOIM artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: sboim-results-${{ github.run_id }}
+
+      - name: Upload SBOIM SARIF
+        if: hashFiles('sboim.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: sboim.sarif
+          category: sboim

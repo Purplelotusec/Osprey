@@ -13,6 +13,7 @@
     "prepare": "npm run build",
     "sbom": "tsx cli/generate-sbom.ts",
     "kev": "tsx cli/kev-check.ts",
+    "report": "tsx cli/report-sboim.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
