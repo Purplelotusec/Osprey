@@ -1,4 +1,5 @@
 import type { CrossCheckMatch } from "../correlation/matcher.js";
+import { fetchText } from "../network/http.js";
 
 export interface AlertOptions {
   webhookUrl: string;
@@ -14,6 +15,7 @@ export interface AlertOptions {
  */
 export async function sendCrossCheckAlert(matches: CrossCheckMatch[], options: AlertOptions): Promise<void> {
   if (matches.length === 0) return;
+  validateWebhookUrl(options.webhookUrl);
 
   const high = matches.filter((m) => m.confidence === "high");
   const low = matches.filter((m) => m.confidence === "low");
@@ -38,14 +40,24 @@ export async function sendCrossCheckAlert(matches: CrossCheckMatch[], options: A
     }
   }
 
-  const res = await fetch(options.webhookUrl, {
+  await fetchText(options.webhookUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text: lines.join("\n") }),
   });
+}
 
-  if (!res.ok) {
-    throw new Error(`Webhook alert failed: HTTP ${res.status} ${res.statusText}`);
+function validateWebhookUrl(endpoint: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(endpoint);
+  } catch {
+    throw new Error("Webhook URL must be a valid URL");
+  }
+  if (parsed.username || parsed.password) throw new Error("Webhook URL must not contain embedded credentials");
+  const loopback = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1";
+  if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) {
+    throw new Error("Webhook URL must use HTTPS (HTTP is allowed only for loopback local development)");
   }
 }
 

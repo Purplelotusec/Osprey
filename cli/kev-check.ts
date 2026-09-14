@@ -9,6 +9,7 @@ import { sendCrossCheckAlert, printCrossCheckResults } from "../src/alerting/web
 import { generateSbom } from "../src/sbom/generate/index.js";
 import { runKevCheck } from "../src/vulnerability/check.js";
 import { lookupOsvAdvisories } from "../src/vulnerability/osv.js";
+import { z } from "zod";
 import type { NormalizedComponent } from "../src/sbom/types.js";
 import type { SboimResult } from "../src/vulnerability/types.js";
 
@@ -79,11 +80,15 @@ program.parse();
 
 function loadComponentsFromSbomFile(path: string): NormalizedComponent[] {
   if (!existsSync(path)) throw new Error(`SBOM file not found: ${path}`);
-  const doc = JSON.parse(readFileSync(path, "utf-8"));
-  if (doc.bomFormat !== "CycloneDX") {
-    throw new Error(`${path} is not a CycloneDX document (missing bomFormat: "CycloneDX")`);
-  }
-  return (doc.components ?? []).map((c: any) => ({
+  const parsed = z.object({
+    bomFormat: z.literal("CycloneDX"),
+    components: z.array(z.object({
+      name: z.string(), version: z.string().optional(), purl: z.string().optional(), cpe: z.string().optional(),
+      group: z.string().optional(), publisher: z.string().optional(),
+    }).passthrough()).default([]),
+  }).safeParse(JSON.parse(readFileSync(path, "utf-8")));
+  if (!parsed.success) throw new Error(`${path} is not a valid CycloneDX document: ${parsed.error.issues[0]?.message}`);
+  return parsed.data.components.map((c) => ({
     purl: c.purl,
     cpe: c.cpe,
     namespace: c.group,
@@ -94,9 +99,19 @@ function loadComponentsFromSbomFile(path: string): NormalizedComponent[] {
 }
 
 function loadPipelineResult(path: string) {
-  const result = JSON.parse(readFileSync(path, "utf-8"));
-  if (!result.subjectName || !Array.isArray(result.components) || !result.stages) {
-    throw new Error(`Invalid SBOIM pipeline result: ${path}`);
-  }
-  return result;
+  const result = z.object({
+    subjectName: z.string(),
+    components: z.array(z.object({ name: z.string(), version: z.string().optional(), purl: z.string().optional(), ecosystem: z.string().optional(), namespace: z.string().optional(), vendor: z.string().optional(), cpe: z.string().optional(), isDirect: z.boolean().optional() }).passthrough()),
+    warnings: z.array(z.string()),
+    stages: z.object({
+      generate: z.object({ status: z.enum(["succeeded", "failed", "skipped"]) }).passthrough(),
+      sign: z.object({ status: z.enum(["succeeded", "failed", "skipped"]) }).passthrough(),
+      store: z.object({ status: z.enum(["succeeded", "failed", "skipped"]) }).passthrough(),
+      pollKev: z.object({ status: z.enum(["succeeded", "failed", "skipped"]) }).passthrough(),
+      crossCheck: z.object({ status: z.enum(["succeeded", "failed", "skipped"]) }).passthrough(),
+      alert: z.object({ status: z.enum(["succeeded", "failed", "skipped"]) }).passthrough(),
+    }),
+  }).safeParse(JSON.parse(readFileSync(path, "utf-8")));
+  if (!result.success) throw new Error(`Invalid SBOIM pipeline result: ${path}: ${result.error.issues[0]?.message}`);
+  return result.data;
 }

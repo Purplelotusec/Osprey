@@ -61,4 +61,14 @@ describe("end-to-end generateSbom + toCycloneDxJson", () => {
   it("throws a clear error when no supported manifest is found", () => {
     expect(() => generateSbom({ projectDir: "/tmp/definitely-empty-dir-xyz" })).toThrow(/Could not detect/);
   });
+
+  it("rejects a malformed npm lockfile instead of producing an empty SBOM", () => {
+    const malformedProject = join(here, "fixtures", "malformed-npm-project");
+    expect(() => generateSbom({ projectDir: malformedProject })).toThrow(/requires a packages object/);
+  });
+
+  it("rejects a v3 lockfile with an invalid packages value", () => {
+    const malformedProject = join(here, "fixtures", "invalid-packages-npm-project");
+    expect(() => generateSbom({ projectDir: malformedProject })).toThrow(/requires a packages object/);
+  });
 });

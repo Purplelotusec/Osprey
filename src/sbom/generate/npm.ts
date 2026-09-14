@@ -47,15 +47,26 @@ export function generateFromNpmProject(projectDir: string): NpmGenerationResult 
     );
   }
   const lock: PackageLockV2V3 = JSON.parse(readFileSync(lockPath, "utf-8"));
+  if (!Number.isInteger(lock.lockfileVersion) || ![1, 2, 3].includes(lock.lockfileVersion)) {
+    throw new Error(`Unsupported or malformed package-lock.json at ${lockPath}: expected lockfileVersion 1, 2, or 3`);
+  }
 
-  const components: NormalizedComponent[] =
-    lock.lockfileVersion >= 2 && lock.packages ? parseV2V3(lock) : parseV1(lock);
+  const components: NormalizedComponent[] = lock.lockfileVersion === 1
+    ? parseV1(lock)
+    : parseV2V3(requirePackagesObject(lock, lockPath));
 
   return {
     subjectName: pkgJson.name ?? "unknown-npm-project",
     subjectVersion: pkgJson.version,
     components,
   };
+}
+
+function requirePackagesObject(lock: PackageLockV2V3, lockPath: string): PackageLockV2V3 {
+  if (!lock.packages || typeof lock.packages !== "object" || Array.isArray(lock.packages)) {
+    throw new Error(`Malformed package-lock.json at ${lockPath}: lockfileVersion ${lock.lockfileVersion} requires a packages object`);
+  }
+  return lock;
 }
 
 function parseV2V3(lock: PackageLockV2V3): NormalizedComponent[] {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderAnnotations, renderSummary, toSarif } from "../src/reporting/report.js";
+import { parseSboimResult } from "../src/reporting/input.js";
 import type { SecurityFinding, SboimResult } from "../src/vulnerability/types.js";
 
 function result(overrides: Partial<SboimResult> = {}): SboimResult {
@@ -97,6 +98,10 @@ describe("SBOIM reporting", () => {
   it("creates an empty SARIF result set when there are no findings", () => {
     expect(toSarif(result()).runs[0].results).toEqual([]);
     expect(renderSummary(result())).toContain("No KEV findings were reported.");
+  });
+
+  it("rejects malformed structured results before rendering", () => {
+    expect(() => parseSboimResult({ status: "passed" })).toThrow(/Invalid SBOIM result/);
   });
 
   it("annotates high-confidence findings and failed stages only", () => {

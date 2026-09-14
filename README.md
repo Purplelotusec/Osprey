@@ -27,6 +27,7 @@ Everything below has been run and verified in this environment — not just writ
 - Signing is local-key Ed25519, not full Sigstore keyless/transparency-log — same crypto primitive, less infrastructure. Upgrading to cosign's keyless flow later doesn't require changing the envelope shape.
 - The CISA feed itself couldn't be hit from this sandbox (network allowlist blocks `cisa.gov` here) — poller logic was verified end-to-end against a synthetic snapshot in the exact response shape instead. It will hit the real feed with normal internet access (Render, your own machine, CI).
 - Version intelligence currently supports npm packages through OSV. CISA KEV supplies the `known_exploited` exploitation signal; OSV supplies affected-version evidence. `unknown` means the version could not be established or advisory evidence was unavailable, and is never treated as affected.
+- Network requests use bounded timeouts and response sizes. S3 endpoints must use HTTPS, except for loopback-only local development. Malformed external JSON is rejected rather than treated as an empty or safe result.
 
 ## Usage
 
@@ -120,3 +121,8 @@ tests/            49 passing tests, real fixtures
 ```
 S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_FORCE_PATH_STYLE
 ```
+
+`npm audit` currently reports vulnerabilities in the Vitest/Vite development-only
+test runner chain. Production runtime dependencies are not affected. The
+available remediation requires a breaking Vitest major upgrade, so it is not
+applied automatically during this audit.
