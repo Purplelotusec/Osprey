@@ -8,6 +8,7 @@ import { crossCheck } from "../src/correlation/matcher.js";
 import { sendCrossCheckAlert, printCrossCheckResults } from "../src/alerting/webhook.js";
 import { generateSbom } from "../src/sbom/generate/index.js";
 import { runKevCheck } from "../src/vulnerability/check.js";
+import { lookupOsvAdvisories } from "../src/vulnerability/osv.js";
 import type { NormalizedComponent } from "../src/sbom/types.js";
 import type { SboimResult } from "../src/vulnerability/types.js";
 
@@ -33,6 +34,7 @@ program
       webhookUrl: options.webhook,
       failOnHigh: options.failOnHigh,
       pipeline,
+      lookupAdvisories: lookupOsvAdvisories,
       generateComponents: () => {
         const components = options.sbom
           ? loadComponentsFromSbomFile(resolve(options.sbom))
