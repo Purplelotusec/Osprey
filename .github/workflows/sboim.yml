@@ -33,14 +33,15 @@ jobs:
         run: npm run build
 
       - name: Generate SBOM
-        run: npm run sbom -- --path . --output sbom.json
+        continue-on-error: true
+        run: npm run sbom -- --path . --output sbom.json --pipeline-result sboim-pipeline.json
 
       - name: Check CISA KEV
         id: kev
         shell: bash
         run: |
           set +e
-          npm run kev -- --sbom sbom.json --result sboim-result.json --cache "$RUNNER_TEMP/kev-cache.json" --fail-on-high 2>&1 | tee kev-check.log
+          npm run kev -- --sbom sbom.json --pipeline-result sboim-pipeline.json --result sboim-result.json --cache "$RUNNER_TEMP/kev-cache.json" --fail-on-high 2>&1 | tee kev-check.log
           kev_exit=${PIPESTATUS[0]}
           set -e
 
@@ -85,5 +86,6 @@ jobs:
           path: |
             sbom.json
             sbom.json.dsse.json
+            sboim-pipeline.json
             sboim-result.json
             kev-check.log

@@ -18,6 +18,7 @@ program
   .description("Poll CISA KEV and cross-check it against a project's dependencies")
   .option("-p, --path <dir>", "project directory to generate an SBOM from (if --sbom not given)", ".")
   .option("--sbom <file>", "use an existing CycloneDX JSON SBOM instead of generating one")
+  .option("--pipeline-result <file>", "reuse Generate/Sign/Store stage state from cra-sbom")
   .option("--cache <file>", "KEV cache file, used as fallback on fetch failure", join(homedir(), ".cra-guard", "kev-cache.json"))
   .option("--offline", "use only the cached KEV snapshot, no network call", false)
   .option("--webhook <url>", "Slack-compatible webhook URL to alert on matches")
@@ -25,11 +26,13 @@ program
   .option("--fail-on-high", "exit non-zero if any high-confidence match is found (for CI gating)", false)
   .action(async (options) => {
     const resultPath = options.result ? resolve(options.result) : undefined;
-    const subjectName = options.sbom ? options.sbom : resolve(options.path);
+    const pipeline = options.pipelineResult ? loadPipelineResult(resolve(options.pipelineResult)) : undefined;
+    const subjectName = pipeline?.subjectName ?? (options.sbom ? options.sbom : resolve(options.path));
     const result = await runKevCheck({
       subjectName,
       webhookUrl: options.webhook,
       failOnHigh: options.failOnHigh,
+      pipeline,
       generateComponents: () => {
         const components = options.sbom
           ? loadComponentsFromSbomFile(resolve(options.sbom))
@@ -86,4 +89,12 @@ function loadComponentsFromSbomFile(path: string): NormalizedComponent[] {
     version: c.version,
     vendor: c.publisher,
   }));
+}
+
+function loadPipelineResult(path: string) {
+  const result = JSON.parse(readFileSync(path, "utf-8"));
+  if (!result.subjectName || !Array.isArray(result.components) || !result.stages) {
+    throw new Error(`Invalid SBOIM pipeline result: ${path}`);
+  }
+  return result;
 }

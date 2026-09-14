@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { writeFileSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve, join } from "node:path";
 import { homedir } from "node:os";
-import { runPipeline } from "../src/sbom/pipeline.js";
+import { PipelineStageError, runPipeline } from "../src/sbom/pipeline.js";
 import { generateSigningKeypair } from "../src/sbom/signing.js";
 import { loadStorageConfigFromEnv } from "../src/sbom/storage.js";
 
@@ -20,6 +20,7 @@ program
   .option("--key-id <id>", "identifier embedded in the signature envelope", "default")
   .option("--generate-key", "generate a new signing keypair at --key (and --key.pub) if missing", false)
   .option("--store", "upload the SBOM (and signature, if signed) to object storage — reads S3_* env vars", false)
+  .option("--pipeline-result <file>", "write Generate/Sign/Store stage state for the KEV check")
   .action(async (options) => {
     try {
       const projectDir = resolve(options.path);
@@ -44,12 +45,30 @@ program
         }
       }
 
-      const { record, warnings } = await runPipeline({
+      const { record, warnings, stages } = await runPipeline({
         projectDir,
         ecosystem: options.ecosystem,
         sign: options.sign ? { privateKeyPath: options.key, keyId: options.keyId } : undefined,
         store: storeConfig,
       });
+
+      if (options.pipelineResult) {
+        const pipelineResultPath = resolve(options.pipelineResult);
+        mkdirSync(dirname(pipelineResultPath), { recursive: true });
+        writeFileSync(
+          pipelineResultPath,
+          JSON.stringify(
+            {
+              subjectName: record.sbom.subjectName,
+              components: record.sbom.components,
+              warnings,
+              stages,
+            },
+            null,
+            2
+          ) + "\n"
+        );
+      }
 
       for (const w of warnings) console.warn(`Warning: ${w}`);
 
@@ -72,6 +91,23 @@ program
         }
       }
     } catch (err) {
+      if (options.pipelineResult && err instanceof PipelineStageError) {
+        const pipelineResultPath = resolve(options.pipelineResult);
+        mkdirSync(dirname(pipelineResultPath), { recursive: true });
+        writeFileSync(
+          pipelineResultPath,
+          JSON.stringify(
+            {
+              subjectName: resolve(options.path),
+              components: [],
+              warnings: [],
+              stages: err.stages,
+            },
+            null,
+            2
+          ) + "\n"
+        );
+      }
       console.error(`Error: ${(err as Error).message}`);
       process.exit(1);
     }
