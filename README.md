@@ -240,62 +240,6 @@ Version-enriched findings add `identityConfidence`, `versionStatus`, `exploitati
 
 The GitHub Actions reporter (`cra-report`) turns this result into a job summary, escaped annotations, and SARIF output.
 
----
-
-## Configuration
-
-Environment variables (S3 ones are only needed when storing SBOMs with `--store`):
-
-| Variable | Purpose |
-|---|---|
-| `GITHUB_TOKEN` | Access private GitHub repos |
-| `S3_ENDPOINT` | S3-compatible endpoint (HTTPS required, except loopback for local dev) |
-| `S3_REGION` | S3 region |
-| `S3_BUCKET` | Bucket name |
-| `S3_ACCESS_KEY_ID` | Access key |
-| `S3_SECRET_ACCESS_KEY` | Secret key |
-| `S3_FORCE_PATH_STYLE` | Use path-style S3 URLs |
-
----
-
-## Architecture
-
-```
-src/
-  sbom/
-    generate/
-      npm.ts            package-lock.json v1/v2/v3 parser
-      python.ts         requirements.txt parser (exact pins only)
-      remote.ts         GitHub repository SBOM generation
-      index.ts          Orchestrator + CycloneDX renderer
-    purl.ts             Package URL parse/build
-    signing.ts          Ed25519 DSSE sign/verify
-    storage.ts          S3-compatible put/get
-    pipeline.ts         generate → sign → store workflow
-  vulnerability/
-    kev.ts              CISA KEV poller with caching
-    osv.ts              OSV advisory lookup
-    version.ts          Version status evaluation
-    check.ts            End-to-end KEV check orchestration
-  correlation/
-    matcher.ts          Confidence-tiered cross-check logic
-  output/
-    formatter.ts        Terminal color/symbol utilities
-    audit-report.ts     Formatted vulnerability reports
-  network/
-    http.ts             Bounded fetch utilities
-    github.ts           GitHub repository file fetcher
-  alerting/
-    webhook.ts          Slack-compatible alerting
-  reporting/
-    report.ts           SARIF + GitHub Actions integration
-cli/
-  audit.ts              cra / cra-audit
-  generate-sbom.ts      cra-sbom
-  kev-check.ts          cra-kev
-  report-sboim.ts       cra-report
-tests/                  Unit tests with real fixtures
-```
 
 ---
 
@@ -318,7 +262,7 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, an
 
 ---
 
-## Supported Ecosystems & Limitations
+## Supported Ecosystems 
 
 ### What works today
 
@@ -337,9 +281,4 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, an
 
 ---
 
-## Security Notes
 
-- All network requests use bounded timeouts and response sizes.
-- S3 endpoints must use HTTPS (loopback allowed for local development).
-- Malformed external JSON is rejected, never treated as an empty or safe result.
-- `npm audit` reports issues in the Vitest/Vite dev-dependency chain (an `esbuild` dev-server issue). These affect only the test runner, not the shipped binaries. The fix requires a breaking Vitest major upgrade and is not applied automatically.
