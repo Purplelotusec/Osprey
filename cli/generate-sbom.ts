@@ -16,7 +16,7 @@ program
   .option("-o, --output <file>", "write the SBOM JSON to this file")
   .option("--ecosystem <type>", "force npm or python instead of auto-detecting")
   .option("--sign", "sign the SBOM with an Ed25519 key", false)
-  .option("--key <path>", "path to the Ed25519 private key PEM", join(homedir(), ".cra-guard", "sbom-signing-key.pem"))
+  .option("--key <path>", "path to the Ed25519 private key PEM", join(homedir(), ".osprey", "sbom-signing-key.pem"))
   .option("--key-id <id>", "identifier embedded in the signature envelope", "default")
   .option("--generate-key", "generate a new signing keypair at --key (and --key.pub) if missing", false)
   .option("--store", "upload the SBOM (and signature, if signed) to object storage — reads S3_* env vars", false)
