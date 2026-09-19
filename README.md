@@ -1,9 +1,10 @@
-#  Osprey
+<img width="3362" height="2241" alt="image" src="https://github.com/user-attachments/assets/9687c232-9708-464b-996f-ec34c64652e4" />#  Osprey
 
 https://www.purplelotus.space/blog/introducing-osprey
 
 <img width="753" height="181" alt="image" src="https://github.com/user-attachments/assets/7cba3dda-a61a-42b0-b61e-cbabd8689dac" />
 
+<img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/4643aa23-370a-4294-9962-18a6823893e7" />
 
 
 Osprey is a CLI (`cra`) that builds a Software Bill of Materials (SBOM) from your project, cross-checks every component against the [CISA Known Exploited Vulnerabilities (KEV)](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) catalog, and tells you which dependencies are *actively exploited in the wild*, not merely "have a CVE".
