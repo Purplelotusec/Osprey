@@ -1,6 +1,7 @@
 #  Osprey
 
-<img width="1024" height="435" alt="image" src="https://github.com/user-attachments/assets/4fd5f84e-4c21-4cd9-a5b6-5d89997eb93f" />
+<img width="1024" height="309" alt="image" src="https://github.com/user-attachments/assets/87cfc0e3-2984-478a-814e-64ac755f515a" />
+
 
 
 
