@@ -11,7 +11,7 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
 
   // Header
   console.log(section("Vulnerability Audit"));
-  console.log(`${result.sbomComponentCount} components analyzed`);
+  console.log(`${result.sbomComponentCount} packages checked`);
   console.log();
 
   // Overall status - VERSION-AWARE
