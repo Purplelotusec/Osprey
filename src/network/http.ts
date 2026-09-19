@@ -1,9 +1,11 @@
-const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_TIMEOUT_MS = 30_000; // Increased from 15s to 30s for large API responses
 const DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
 
 export interface BoundedFetchOptions {
   timeoutMs?: number;
   maxBytes?: number;
+  retries?: number;
+  retryDelay?: number;
 }
 
 export async function fetchText(
@@ -53,10 +55,34 @@ export async function fetchJson(
   init: RequestInit = {},
   options: BoundedFetchOptions = {}
 ): Promise<unknown> {
-  const body = await fetchText(url, init, options);
-  try {
-    return JSON.parse(body);
-  } catch {
-    throw new Error("HTTP response was not valid JSON");
+  const retries = options.retries ?? 3;
+  const retryDelay = options.retryDelay ?? 1000;
+
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const body = await fetchText(url, init, options);
+      try {
+        return JSON.parse(body);
+      } catch {
+        throw new Error("HTTP response was not valid JSON");
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Don't retry on 4xx errors (client errors)
+      if (lastError.message.match(/HTTP 4\d\d/)) {
+        throw lastError;
+      }
+
+      // Retry on network errors, timeouts, 5xx errors
+      if (attempt < retries) {
+        await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
+        continue;
+      }
+    }
   }
+
+  throw lastError ?? new Error("Fetch failed");
 }
