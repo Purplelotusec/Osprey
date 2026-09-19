@@ -30,12 +30,12 @@ Osprey is a CLI (`cra`) that builds a Software Bill of Materials (SBOM) from you
 
 | | |
 |---|---|
-| 🚨 **KEV detection** | Cross-checks components against CISA's KEV catalog |
-| 🎯 **Confidence tiers** | `high` (PURL-backed exact match) vs `low` (name/vendor match only) |
-| 🧠 **Version intelligence** | Uses [OSV](https://osv.dev) to decide whether your *installed* version is actually affected |
-| 🌐 **Remote auditing** | Audit a GitHub repo without cloning it |
-| 🔏 **SBOM signing** | Ed25519 signatures in a DSSE envelope, with tamper detection |
-| 🔔 **Alerting** | Slack-compatible webhook, one batched message per run |
+|  **KEV detection** | Cross-checks components against CISA's KEV catalog |
+|  **Confidence tiers** | `high` (PURL-backed exact match) vs `low` (name/vendor match only) |
+|  **Version intelligence** | Uses [OSV](https://osv.dev) to decide whether your *installed* version is actually affected |
+|  **Remote auditing** | Audit a GitHub repo without cloning it |
+| **SBOM signing** | Ed25519 signatures in a DSSE envelope, with tamper detection |
+
 
 ---
 
