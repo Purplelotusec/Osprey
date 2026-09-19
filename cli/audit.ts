@@ -58,29 +58,25 @@ program
         lookupAdvisories: lookupOsvAdvisories,
         generateComponents: async () => {
           if (isRemote) {
-            console.log("Fetching package files from GitHub...");
+            console.log("Analyzing repository...");
             const repoInfo = parseGitHubUrl(options.url);
             const sbomResult = await generateSbomFromGitHub({ repoInfo, token: githubToken });
-            console.log(`Found ${sbomResult.sbom.components.length} components\n`);
             return sbomResult.sbom.components;
           } else {
-            console.log("Generating SBOM from local project...");
+            console.log("Analyzing project...");
             const sbomResult = generateSbom({ projectDir: resolve(options.path) });
-            console.log(`Found ${sbomResult.sbom.components.length} components\n`);
             return sbomResult.sbom.components;
           }
         },
         pollKev: async () => {
-          console.log("Polling CISA Known Exploited Vulnerabilities (KEV)...");
+          console.log("Checking for vulnerabilities...");
           const snapshot = await pollKev({
             cachePath: resolve(options.cache),
             offline: options.offline,
           });
-          console.log(`Loaded ${snapshot.entries.length} KEV entries (as of ${snapshot.dateReleased ?? snapshot.fetchedAt})\n`);
           return snapshot;
         },
         crossCheck: (components, entries, advisories) => {
-          console.log("Cross-checking components against KEV database...\n");
           return crossCheckWithAdvisories(components, entries, advisories);
         },
         sendAlert: async () => {
