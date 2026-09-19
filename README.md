@@ -1,4 +1,4 @@
-# 🦅 Osprey
+#  Osprey
 
 https://www.purplelotus.space/blog/introducing-osprey
 
