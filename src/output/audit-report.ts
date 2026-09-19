@@ -16,23 +16,25 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
   console.log(`KEV entries checked: ${result.kevSnapshot.entryCount} (as of ${result.kevSnapshot.dateReleased ?? result.kevSnapshot.fetchedAt})`);
   console.log();
 
-  // Overall status
-  const hasHighConfidenceMatches = result.highConfidenceMatchCount > 0;
-  const hasLowConfidenceMatches = result.lowConfidenceMatchCount > 0;
+  // Overall status - VERSION-AWARE
+  const hasAffected = result.affectedCount > 0;
+  const hasNotAffected = result.notAffectedCount > 0;
+  const hasUnknown = result.unknownCount > 0;
 
-  if (!hasHighConfidenceMatches && !hasLowConfidenceMatches) {
+  if (!hasAffected && !hasNotAffected && !hasUnknown) {
     console.log(colorize(`${symbols.success} No active exploitable vulnerabilities detected`, "green"));
     console.log(dim("All components are clear of known exploited vulnerabilities."));
   } else {
-    console.log(colorize(`${symbols.error} Vulnerable components detected`, "red"));
+    if (hasAffected) {
+      console.log(colorize(`${symbols.error} ${result.affectedCount} VULNERABLE package(s) actively exploited`, "red"));
+    }
+    if (hasNotAffected) {
+      console.log(colorize(`${symbols.success} ${result.notAffectedCount} package(s) with CVE but version is SAFE (patched)`, "green"));
+    }
+    if (hasUnknown) {
+      console.log(colorize(`${symbols.warning} ${result.unknownCount} package(s) with UNKNOWN version status`, "yellow"));
+    }
     console.log();
-
-    if (hasHighConfidenceMatches) {
-      console.log(colorize(`  ${symbols.error} ${result.highConfidenceMatchCount} HIGH confidence match(es)`, "red"));
-    }
-    if (hasLowConfidenceMatches && showLowConfidence) {
-      console.log(colorize(`  ${symbols.warning} ${result.lowConfidenceMatchCount} LOW confidence match(es)`, "yellow"));
-    }
   }
 
   // High confidence findings
@@ -69,11 +71,12 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
 
   // Summary
   console.log(section("Summary"));
-  const status = hasHighConfidenceMatches ? colorize("FAILED", "red") : colorize("PASSED", "green");
+  const status = result.affectedCount > 0 ? colorize("FAILED", "red") : colorize("PASSED", "green");
   console.log(`Status: ${status}`);
-  console.log(`Total matches: ${result.matches.length}`);
-  console.log(`  - High confidence: ${result.highConfidenceMatchCount}`);
-  console.log(`  - Low confidence: ${result.lowConfidenceMatchCount}`);
+  console.log(`Total CVE matches: ${result.matches.length}`);
+  console.log(`  - ${colorize("Affected (VULNERABLE)", "red")}: ${result.affectedCount}`);
+  console.log(`  - ${colorize("Not Affected (SAFE)", "green")}: ${result.notAffectedCount}`);
+  console.log(`  - ${colorize("Unknown status", "yellow")}: ${result.unknownCount}`);
   console.log();
 }
 
@@ -123,11 +126,20 @@ function printFindings(findings: SecurityFinding[], options: FindingsPrintOption
         console.log(`   Advisories: ${finding.advisoryIds.join(", ")}`);
       }
 
-      // Recommended action
+      // Remediation - show patched version if available
       console.log();
-      console.log(colorize(`   ${symbols.warning} RECOMMENDED ACTION:`, "yellow"));
-      console.log(`   ${dim("Update to the latest patched version immediately.")}`);
-      console.log(`   ${dim(`Check security advisories for ${finding.component.name}`)}`);
+      if (finding.versionStatus === "affected" && finding.patchedVersion) {
+        console.log(colorize(`   ${symbols.warning} REMEDIATION:`, "yellow"));
+        console.log(`   ${colorize(`Current: ${finding.currentVersion ?? "unknown"}`, "red")} → ${colorize(`Upgrade to: ${finding.patchedVersion}+`, "green")}`);
+        console.log(`   ${dim(`Run: npm install ${finding.component.name}@${finding.patchedVersion}`)}`);
+      } else if (finding.versionStatus === "affected") {
+        console.log(colorize(`   ${symbols.warning} RECOMMENDED ACTION:`, "yellow"));
+        console.log(`   ${dim("Update to the latest patched version immediately.")}`);
+        console.log(`   ${dim(`Check security advisories for ${finding.component.name}`)}`);
+      } else if (finding.versionStatus === "not_affected") {
+        console.log(colorize(`   ${symbols.success} SAFE:`, "green"));
+        console.log(`   ${dim("Your current version is not affected by this vulnerability.")}`);
+      }
     }
 
     // Verbose mode
@@ -160,28 +172,45 @@ function getVersionStatusText(finding: SecurityFinding): string {
 }
 
 export function printAuditSummary(result: SboimResult): void {
-  const hasHighConfidenceMatches = result.highConfidenceMatchCount > 0;
+  const hasAffected = result.affectedCount > 0;
+  const hasMatches = result.matches.length > 0;
 
-  if (!hasHighConfidenceMatches && result.lowConfidenceMatchCount === 0) {
+  if (!hasMatches) {
     console.log(colorize(`\n${symbols.success} No active exploitable vulnerabilities detected\n`, "green"));
-  } else if (hasHighConfidenceMatches) {
-    console.log(colorize(`\n${symbols.error} Found ${result.highConfidenceMatchCount} actively exploited vulnerable component(s)\n`, "red"));
-
-    // Show quick list
-    const highConfidence = result.matches.filter((m) => m.confidence === "high");
-    const rows = highConfidence.map((finding) => [
-      colorize(symbols.error, "red"),
-      finding.component.name,
-      finding.component.version ?? "unknown",
-      finding.kevEntry.cveId,
-      getVersionStatusBadge(finding.versionStatus),
-    ]);
-
-    console.log(formatTable([
-      [bold(""), bold("Package"), bold("Version"), bold("CVE"), bold("Status")],
-      ...rows,
-    ], { indent: 2 }));
+  } else {
+    // Show status breakdown
     console.log();
+    if (hasAffected) {
+      console.log(colorize(`${symbols.error} ${result.affectedCount} VULNERABLE package(s) actively exploited`, "red"));
+    } else {
+      console.log(colorize(`${symbols.success} All packages are safe (patched or unaffected)`, "green"));
+    }
+
+    if (result.notAffectedCount > 0) {
+      console.log(colorize(`${symbols.success} ${result.notAffectedCount} package(s) have CVE but are SAFE (patched)`, "green"));
+    }
+    if (result.unknownCount > 0) {
+      console.log(colorize(`${symbols.warning} ${result.unknownCount} package(s) with UNKNOWN version status`, "yellow"));
+    }
+    console.log();
+
+    // Show detailed table for affected packages
+    if (hasAffected) {
+      const affected = result.matches.filter((m) => m.versionStatus === "affected");
+      const rows = affected.map((finding) => [
+        colorize(symbols.error, "red"),
+        finding.component.name,
+        finding.currentVersion ?? "unknown",
+        finding.kevEntry.cveId,
+        finding.patchedVersion ? colorize(finding.patchedVersion, "green") : "see advisory",
+      ]);
+
+      console.log(formatTable([
+        [bold(""), bold("Package"), bold("Current"), bold("CVE"), bold("Patched Version")],
+        ...rows,
+      ], { indent: 2 }));
+      console.log();
+    }
   }
 }
 
