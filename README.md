@@ -1,117 +1,173 @@
 # 🦅 Osprey
 
-**SBOM Security Auditing & CISA KEV Vulnerability Detection**
+**SBOM generation, signing, and CISA KEV vulnerability detection for your dependencies.**
 
-Osprey is a powerful CLI tool (`cra`) that helps you identify actively exploited vulnerabilities in your software dependencies by cross-checking against the CISA Known Exploited Vulnerabilities (KEV) catalog.
+Osprey is a CLI (`cra`) that builds a Software Bill of Materials (SBOM) from your project, cross-checks every component against the [CISA Known Exploited Vulnerabilities (KEV)](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) catalog, and tells you which dependencies are *actively exploited in the wild*, not merely "have a CVE".
+
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+- [CLI Reference](#cli-reference)
+- [Understanding the Output](#understanding-the-output)
+- [Structured Results & CI](#structured-results--ci)
+- [Configuration](#configuration)
+- [Architecture](#architecture)
+- [Development](#development)
+- [Supported Ecosystems & Limitations](#supported-ecosystems--limitations)
+- [Security Notes](#security-notes)
+
+---
 
 ## Features
 
-🔍 **SBOM Generation** — Generates Software Bill of Materials (SBOM) in CycloneDX format from npm and Python projects
-🎯 **KEV Detection** — Cross-checks components against CISA's Known Exploited Vulnerabilities (KEV) catalog
-🚨 **Security Auditing** — Provides color-coded, actionable reports on actively exploited vulnerabilities
-🌐 **Remote Auditing** — Audit GitHub repositories without cloning them locally
-✅ **Version Intelligence** — Uses OSV to determine if your installed versions are affected
-🔐 **SBOM Signing** — Ed25519 digital signatures with DSSE envelope
-☁️ **Cloud Storage** — S3-compatible SBOM storage and retrieval
+| | |
+|---|---|
+| 📦 **SBOM generation** | CycloneDX SBOMs from npm and Python projects |
+| 🚨 **KEV detection** | Cross-checks components against CISA's KEV catalog |
+| 🎯 **Confidence tiers** | `high` (PURL-backed exact match) vs `low` (name/vendor match only) |
+| 🧠 **Version intelligence** | Uses [OSV](https://osv.dev) to decide whether your *installed* version is actually affected |
+| 🌐 **Remote auditing** | Audit a GitHub repo without cloning it |
+| 🔏 **SBOM signing** | Ed25519 signatures in a DSSE envelope, with tamper detection |
+| 🔔 **Alerting** | Slack-compatible webhook, one batched message per run |
+| ⚙️ **CI-ready** | GitHub Actions job summary, annotations, and SARIF output |
 
-Everything below has been run and verified in this environment — not just written.
-
-## What's real vs. what's a known limitation
-
-**Works today:**
-
-- npm: full `package-lock.json` (v1, v2, v3) parsing — direct vs. transitive deps, scoped packages, dedup
-- Python: `requirements.txt` with exact pins (`pkg==1.2.3`) — ranges/VCS lines are explicitly skipped and reported, never guessed
-- Ed25519 signing via DSSE pre-authentication encoding — tamper detection verified (changing one byte of the SBOM after signing fails verification; signing with the wrong key fails verification)
-- CISA KEV polling with schema validation (Zod) and local caching so a network hiccup doesn't silently report "no vulnerabilities"
-- Cross-check with two confidence tiers — `high` (PURL-backed exact product match) vs `low` (name/vendor match only) — because CISA KEV entries are free-text vendor/product names, not machine-precise CPE ranges. See `src/correlation/matcher.ts` for why this distinction exists and matters for any downstream automation (e.g. auto-starting a regulatory clock — don't, on `low` confidence).
-- Slack-compatible webhook alerting, batched into one message per run, high/low separated
-- npm version intelligence using OSV advisories, with authoritative affected/not-affected/unknown status
-- GitHub Actions reporting from the structured result: job summary, escaped annotations, and SARIF output
-
-**Known limitations, stated honestly:**
-- No yarn.lock / pnpm-lock.yaml / poetry.lock / go.sum / Cargo.lock generators yet — npm and pinned-pip only
-- CPE matching not implemented — KEV's free-text fields are the only signal; an NVD/OSV-backed provider with real affected-version ranges would upgrade the `low` tier to something more precise
-- Signing is local-key Ed25519, not full Sigstore keyless/transparency-log — same crypto primitive, less infrastructure. Upgrading to cosign's keyless flow later doesn't require changing the envelope shape.
-- The CISA feed itself couldn't be hit from this sandbox (network allowlist blocks `cisa.gov` here) — poller logic was verified end-to-end against a synthetic snapshot in the exact response shape instead. It will hit the real feed with normal internet access (Render, your own machine, CI).
-- Version intelligence currently supports npm packages through OSV. CISA KEV supplies the `known_exploited` exploitation signal; OSV supplies affected-version evidence. `unknown` means the version could not be established or advisory evidence was unavailable, and is never treated as affected.
-- Network requests use bounded timeouts and response sizes. S3 endpoints must use HTTPS, except for loopback-only local development. Malformed external JSON is rejected rather than treated as an empty or safe result.
+---
 
 ## Quick Start
-
-### Installation
 
 ```bash
 git clone <your-repo-url>
 cd osprey
-npm install
-npm run build
+npm install      # builds automatically via the "prepare" script
+npm link         # optional: installs cra, cra-audit, cra-sbom, cra-kev, cra-report globally
 ```
 
-### Main Command: `cra` (Recommended)
+Audit a project:
 
-The `cra` command is the easiest way to audit your projects for CISA KEV vulnerabilities:
-
-**Audit a local project:**
 ```bash
-npm run cra -- --path /path/to/your/project
-
-# Or after global install:
 cra --path /path/to/your/project
 ```
 
-**Audit a GitHub repository:**
-```bash
-npm run cra -- --url https://github.com/owner/repo
-npm run cra -- --url owner/repo  # Short form also works
+Audit a GitHub repository:
 
-# Or after global install:
+```bash
 cra --url facebook/react
 ```
 
-**With options:**
+Without a global install, prefix commands with `npm run` and separate flags with `--`:
+
 ```bash
-# Audit with detailed output
 npm run cra -- --path . --verbose
-
-# Audit and save results to JSON
-npm run cra -- --url owner/repo --output results.json
-
-# Fail CI if vulnerabilities found
-npm run cra -- --path . --fail-on-high
-
-# Audit private GitHub repo (requires GitHub token)
-npm run cra -- --url owner/private-repo --github-token YOUR_TOKEN
-# Or set environment variable: export GITHUB_TOKEN=YOUR_TOKEN
-
-# Show only summary (condensed output)
-npm run cra -- --path . --summary
 ```
 
-### Global Installation
+> The `--` separates npm's own flags from the tool's flags; everything after it is passed to Osprey.
 
-Install Osprey globally to use the `cra` command anywhere:
+---
+
+## Usage
+
+### Audit a local project
 
 ```bash
-npm install -g .
-# or
-npm link
-
-# Now use from anywhere:
-cra --url facebook/react
-cra --path ~/my-project --verbose
-cra-sbom --path . --output sbom.json
+cra --path .
+cra --path . --verbose       # extra detail
+cra --path . --summary       # condensed output
 ```
 
-### Output Format
+### Audit a GitHub repository
 
-The audit command provides clear, color-coded output:
+```bash
+cra --url https://github.com/owner/repo
+cra --url owner/repo                       # short form
+cra --url owner/repo/tree/main/packages/x  # branch and subdirectory
+```
 
-- ✓ **Green** = No active exploitable vulnerabilities detected
-- ✗ **Red** = Actively exploited vulnerable components found
-- ⚠ **Yellow** = Warnings or low-confidence matches
+Private repositories need a token:
 
-**Example output:**
+```bash
+export GITHUB_TOKEN=YOUR_TOKEN
+cra --url owner/private-repo
+# or: cra --url owner/private-repo --github-token YOUR_TOKEN
+```
+
+### Use in CI
+
+```bash
+cra --path . --fail-on-high --output results.json
+```
+
+Exits non-zero if any **high-confidence** exploited vulnerability is found.
+
+### Generate and sign an SBOM
+
+```bash
+cra-sbom --path . --output sbom.json --sign --generate-key
+```
+
+### Check an existing SBOM
+
+```bash
+cra-kev --sbom sbom.json --cache ~/.osprey/kev-cache.json
+cra-kev --sbom sbom.json --offline            # cached KEV data only
+```
+
+### Alert via webhook
+
+```bash
+cra-kev --path . --webhook https://hooks.slack.com/services/... --fail-on-high
+```
+
+---
+
+## CLI Reference
+
+| Command | Purpose |
+|---|---|
+| `cra` | Main audit command (alias for `cra-audit`) |
+| `cra-audit` | Full audit: generate SBOM → poll KEV → cross-check → report |
+| `cra-sbom` | Generate (and optionally sign) an SBOM |
+| `cra-kev` | Check an existing SBOM or project against KEV |
+| `cra-report` | Produce GitHub Actions reports (job summary, annotations, SARIF) |
+
+### `cra` / `cra-audit` options
+
+| Option | Description | Default |
+|---|---|---|
+| `-p, --path <dir>` | Local project directory to audit | `.` |
+| `-u, --url <github-url>` | GitHub repository to audit | – |
+| `--cache <file>` | KEV cache file path | `~/.osprey/kev-cache.json` |
+| `--offline` | Use only cached KEV data (no network) | `false` |
+| `--output <file>` | Write detailed JSON result to file | – |
+| `--verbose` | Show detailed output | `false` |
+| `--fail-on-high` | Exit with error on high-confidence matches | `false` |
+| `--show-low` | Include low-confidence matches in output | `true` |
+| `--github-token <token>` | GitHub token for private repos | `$GITHUB_TOKEN` |
+| `--summary` | Show only the summary | `false` |
+
+**Accepted GitHub URL formats**
+
+- `https://github.com/owner/repo`
+- `github.com/owner/repo`
+- `owner/repo`
+- `https://github.com/owner/repo/tree/branch`
+- `owner/repo/tree/branch/path/to/dir`
+
+---
+
+## Understanding the Output
+
+| Symbol | Meaning |
+|---|---|
+| ✓ **Green** | No actively exploited vulnerabilities detected |
+| ✗ **Red** | Actively exploited vulnerable components found |
+| ⚠ **Yellow** | Warnings or low-confidence matches |
+
+**Clean run**
+
 ```
 Auditing: /path/to/project
 
@@ -121,146 +177,86 @@ Found 245 components
 Polling CISA Known Exploited Vulnerabilities (KEV)...
 Loaded 1,234 KEV entries (as of 2026-09-18)
 
-Cross-checking components against KEV database...
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SBOM Vulnerability Audit Report
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Subject: /path/to/project
-Components analyzed: 245
-KEV entries checked: 1,234 (as of 2026-09-18)
-
 ✓ No active exploitable vulnerabilities detected
 All components are clear of known exploited vulnerabilities.
 ```
 
-Or if vulnerabilities are found:
+**Findings**
+
 ```
 ✗ Vulnerable components detected
 
   ✗ 2 HIGH confidence match(es)
   ⚠ 1 LOW confidence match(es)
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-High Confidence Vulnerabilities
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 1. CVE-2024-12345
    Component: vulnerable-package@1.2.3
    PURL: pkg:npm/vulnerable-package@1.2.3
    Vulnerability: Remote Code Execution in vulnerable-package
    Version Status: AFFECTED (1.2.3 is vulnerable)
-   Product: vulnerable-package (vendor-name)
-   Description: Critical vulnerability allowing remote code execution
    Required Action: Apply mitigations per vendor instructions or discontinue use
-
-   ⚠ RECOMMENDED ACTION:
-   Update to the latest patched version immediately.
-   Check security advisories for vulnerable-package
 ```
 
-### Advanced Commands
+### Confidence tiers
 
-**Generate SBOM only:**
-```bash
-npm run sbom -- --path . --output sbom.json --sign --generate-key
-```
+CISA KEV entries use free-text vendor and product names, not machine-precise CPE ranges, so Osprey grades every match:
 
-**Check KEV with existing SBOM:**
-```bash
-npm run kev -- --sbom sbom.json --offline --cache ~/.cra-guard/kev-cache.json
-```
+- **`high`**: PURL-backed exact product match.
+- **`low`**: name/vendor match only.
 
-**KEV check with webhook alerting:**
-```bash
-npm run kev -- --path . --webhook https://hooks.slack.com/services/... --fail-on-high
-```
+> ⚠️ **Do not trigger automated regulatory or incident clocks on `low` confidence matches.** See `src/correlation/matcher.ts` for the reasoning.
 
-The KEV CLI can also write a structured result for CI systems and downstream
-automation. It includes the SBOM component count, KEV snapshot metadata, full
-match details, warnings/errors, and status for each pipeline stage:
+### Version status
 
-```bash
-npm run kev -- --sbom sbom.json --result sboim-result.json --fail-on-high
-```
+For npm packages, OSV advisories determine whether your installed version is affected:
 
-The result schema is versioned as `schemaVersion: "1.0"`. Signing and storage
-are currently reported as `skipped`; they can be enabled later when secure CI
-credentials and key management are configured. Each stage includes a `status`
-and may include an optional `reason` explaining a skipped or failed stage;
-existing consumers that only read `status` remain compatible.
+| `versionStatus` | Meaning |
+|---|---|
+| `affected` | OSV evidence covers the installed version |
+| `not_affected` | Available evidence excludes the installed version |
+| `unknown` | Version or advisory evidence couldn't be established. **Never treated as affected.** |
 
-Version-enriched findings add `identityConfidence`, `versionStatus`,
-`exploitationStatus`, and `advisoryIds`. `versionStatus` is `affected` only
-when OSV evidence covers the installed npm version, `not_affected` when the
-available evidence excludes it, and `unknown` when the version or evidence
-cannot be evaluated. `exploitationStatus: "known_exploited"` is independent
-and comes from CISA KEV, not from OSV.
+`exploitationStatus: "known_exploited"` is independent: it comes from CISA KEV, not OSV.
 
-The `--` separates npm's own flags from the CLI's — everything after it goes to the tool.
+---
 
-### Global install — real `cra-sbom` / `cra-kev` commands, anywhere on your machine
+## Structured Results & CI
+
+`--output` (on `cra`) or `--result` (on `cra-kev`) writes a versioned JSON result for CI systems and downstream automation:
 
 ```bash
-git clone <your-repo-url>
-cd cra-guard-core
-npm install    # runs the build automatically via the "prepare" script — no separate build step
-npm link       # installs cra-sbom and cra-kev globally, symlinked to this checkout
+cra-kev --sbom sbom.json --result result.json --fail-on-high
 ```
 
-Verified working (this exact sequence was run against a real clone, not assumed):
+The result (`schemaVersion: "1.0"`) includes:
 
-```bash
-cra-sbom --path ~/some-other-project --output sbom.json --sign --generate-key
-cra-kev --path ~/some-other-project --cache ~/.cra-guard/kev-cache.json
-```
+- SBOM component count
+- KEV snapshot metadata
+- Full match details
+- Warnings and errors
+- A `status` (and optional `reason`) for each pipeline stage
 
-To remove the global commands later: `npm unlink -g cra-guard-core`.
+Version-enriched findings add `identityConfidence`, `versionStatus`, `exploitationStatus`, and `advisoryIds`. Signing and storage stages currently report `skipped` until secure CI credentials and key management are configured. Consumers that only read `status` remain compatible.
 
-Run the test suite (works either way):
+The GitHub Actions reporter (`cra-report`) turns this result into a job summary, escaped annotations, and SARIF output.
 
-```bash
-npm test
-```
+---
 
-49 tests, all passing. `npm audit` will flag a handful of vulnerabilities in `vitest`'s dev-dependency chain (an `esbuild` dev-server issue) — these are test-runner-only and don't affect the `cra-sbom`/`cra-kev` binaries themselves, which depend only on `commander`, `zod`, `semver`, and `@aws-sdk/client-s3`.
+## Configuration
 
-49 tests, all passing as of this build: npm/python generation correctness, signing round-trip
-+ tamper detection + wrong-key rejection, cross-check confidence tiering, npm/OSV version evaluation, and reporting.
+Environment variables (S3 ones are only needed when storing SBOMs with `--store`):
 
-## CLI Commands
+| Variable | Purpose |
+|---|---|
+| `GITHUB_TOKEN` | Access private GitHub repos |
+| `S3_ENDPOINT` | S3-compatible endpoint (HTTPS required, except loopback for local dev) |
+| `S3_REGION` | S3 region |
+| `S3_BUCKET` | Bucket name |
+| `S3_ACCESS_KEY_ID` | Access key |
+| `S3_SECRET_ACCESS_KEY` | Secret key |
+| `S3_FORCE_PATH_STYLE` | Use path-style S3 URLs |
 
-Osprey provides several CLI commands:
-
-- **`cra`** - Main audit command (alias for cra-audit)
-- **`cra-audit`** - Full audit with vulnerability detection
-- **`cra-sbom`** - Generate SBOM only
-- **`cra-kev`** - Check existing SBOM against KEV
-- **`cra-report`** - Generate GitHub Actions reports
-
-## CLI Options Reference
-
-### `cra` / `cra-audit` Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-p, --path <dir>` | Local project directory to audit | `.` (current directory) |
-| `-u, --url <github-url>` | GitHub repository URL to audit | - |
-| `--cache <file>` | KEV cache file path | `~/.osprey/kev-cache.json` |
-| `--offline` | Use only cached KEV data (no network) | `false` |
-| `--output <file>` | Write detailed JSON result to file | - |
-| `--verbose` | Show detailed output with additional info | `false` |
-| `--fail-on-high` | Exit with error if high-confidence vulns found | `false` |
-| `--show-low` | Include low-confidence matches in output | `true` |
-| `--github-token <token>` | GitHub token for private repos | `$GITHUB_TOKEN` |
-| `--summary` | Show only summary output | `false` |
-
-**GitHub URL Formats Supported:**
-- `https://github.com/owner/repo`
-- `github.com/owner/repo`
-- `owner/repo`
-- `https://github.com/owner/repo/tree/branch`
-- `owner/repo/tree/branch/path/to/dir`
+---
 
 ## Architecture
 
@@ -268,46 +264,82 @@ Osprey provides several CLI commands:
 src/
   sbom/
     generate/
-      npm.ts           Full package-lock.json v1/v2/v3 parser
-      python.ts        requirements.txt parser (exact pins only)
-      remote.ts        GitHub repository SBOM generation
-      index.ts         Orchestrator + CycloneDX renderer
-    purl.ts            Package URL parse/build
-    signing.ts         Ed25519 DSSE sign/verify
-    storage.ts         S3-compatible put/get
-    pipeline.ts        generate -> sign -> store workflow
+      npm.ts            package-lock.json v1/v2/v3 parser
+      python.ts         requirements.txt parser (exact pins only)
+      remote.ts         GitHub repository SBOM generation
+      index.ts          Orchestrator + CycloneDX renderer
+    purl.ts             Package URL parse/build
+    signing.ts          Ed25519 DSSE sign/verify
+    storage.ts          S3-compatible put/get
+    pipeline.ts         generate → sign → store workflow
   vulnerability/
-    kev.ts             CISA KEV poller with caching
-    osv.ts             OSV advisory lookup
-    version.ts         Version status evaluation
-    check.ts           End-to-end KEV check orchestration
+    kev.ts              CISA KEV poller with caching
+    osv.ts              OSV advisory lookup
+    version.ts          Version status evaluation
+    check.ts            End-to-end KEV check orchestration
   correlation/
-    matcher.ts         Confidence-tiered cross-check logic
+    matcher.ts          Confidence-tiered cross-check logic
   output/
-    formatter.ts       Terminal color/symbol utilities
-    audit-report.ts    Formatted vulnerability reports
+    formatter.ts        Terminal color/symbol utilities
+    audit-report.ts     Formatted vulnerability reports
   network/
-    http.ts            Bounded fetch utilities
-    github.ts          GitHub repository file fetcher
+    http.ts             Bounded fetch utilities
+    github.ts           GitHub repository file fetcher
   alerting/
-    webhook.ts         Slack-compatible alerting
+    webhook.ts          Slack-compatible alerting
   reporting/
-    report.ts          SARIF + GitHub Actions integration
+    report.ts           SARIF + GitHub Actions integration
 cli/
-  audit.ts           Main audit command (NEW)
-  generate-sbom.ts   SBOM generation CLI
-  kev-check.ts       KEV check CLI
-  report-sboim.ts    GitHub Actions reporting CLI
-tests/               49 passing tests, real fixtures
+  audit.ts              cra / cra-audit
+  generate-sbom.ts      cra-sbom
+  kev-check.ts          cra-kev
+  report-sboim.ts       cra-report
+tests/                  Unit tests with real fixtures
 ```
 
-## Environment variables (only needed for `--store`)
+---
 
-```
-S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_FORCE_PATH_STYLE
+## Development
+
+```bash
+npm install     # also builds
+npm test        # runs the test suite (49 tests)
 ```
 
-`npm audit` currently reports vulnerabilities in the Vitest/Vite development-only
-test runner chain. Production runtime dependencies are not affected. The
-available remediation requires a breaking Vitest major upgrade, so it is not
-applied automatically during this audit.
+The tests cover npm/Python SBOM generation, signing round-trips, tamper detection, wrong-key rejection, confidence tiering, npm/OSV version evaluation, and reporting.
+
+To remove global commands installed with `npm link`:
+
+```bash
+npm unlink -g <package-name>
+```
+
+Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, and `@aws-sdk/client-s3`.
+
+---
+
+## Supported Ecosystems & Limitations
+
+### What works today
+
+- **npm:** full `package-lock.json` (v1, v2, v3) parsing, including direct vs. transitive dependencies, scoped packages, and deduplication.
+- **Python:** `requirements.txt` with exact pins (`pkg==1.2.3`). Ranges and VCS lines are skipped and reported, never guessed.
+- **Signing:** Ed25519 over DSSE pre-authentication encoding. Changing one byte of a signed SBOM, or verifying with the wrong key, fails verification.
+- **KEV polling:** Zod schema validation plus local caching, so a network failure can't silently report "no vulnerabilities".
+
+### Known limitations
+
+- **Lockfile coverage:** no `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `go.sum`, or `Cargo.lock` support yet.
+- **No CPE matching:** KEV's free-text fields are the only matching signal. An NVD/OSV-backed provider with real affected-version ranges would sharpen the `low` tier.
+- **Version intelligence is npm-only:** Python packages don't yet get OSV version evaluation.
+- **Local-key signing:** Ed25519 with local keys, not Sigstore keyless or a transparency log. The envelope shape stays the same if you upgrade to cosign later.
+- **KEV feed verification:** the poller was verified end-to-end against a synthetic snapshot matching the real response shape. Confirm behavior against the live CISA feed in your own environment.
+
+---
+
+## Security Notes
+
+- All network requests use bounded timeouts and response sizes.
+- S3 endpoints must use HTTPS (loopback allowed for local development).
+- Malformed external JSON is rejected, never treated as an empty or safe result.
+- `npm audit` reports issues in the Vitest/Vite dev-dependency chain (an `esbuild` dev-server issue). These affect only the test runner, not the shipped binaries. The fix requires a breaking Vitest major upgrade and is not applied automatically.
