@@ -6,13 +6,12 @@ Osprey is a powerful CLI tool (`cra`) that helps you identify actively exploited
 
 ## Features
 
-🔍 **SBOM Generation** — Generates Software Bill of Materials (SBOM) in CycloneDX format from npm and Python projects
-🎯 **KEV Detection** — Cross-checks components against CISA's Known Exploited Vulnerabilities (KEV) catalog
-🚨 **Security Auditing** — Provides color-coded, actionable reports on actively exploited vulnerabilities
-🌐 **Remote Auditing** — Audit GitHub repositories without cloning them locally
-✅ **Version Intelligence** — Uses OSV to determine if your installed versions are affected
-🔐 **SBOM Signing** — Ed25519 digital signatures with DSSE envelope
-☁️ **Cloud Storage** — S3-compatible SBOM storage and retrieval
+**KEV Detection** — Cross-checks components against CISA's Known Exploited Vulnerabilities (KEV) catalog
+**Security Auditing** — Provides color-coded, actionable reports on actively exploited vulnerabilities
+**Remote Auditing** — Audit GitHub repositories without cloning them locally
+**Version Intelligence** — Uses OSV to determine if your installed versions are affected
+**SBOM Signing** — Ed25519 digital signatures with DSSE envelope
+
 
 Everything below has been run and verified in this environment — not just written.
 
