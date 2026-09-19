@@ -1,4 +1,4 @@
-<img width="3362" height="2241" alt="image" src="https://github.com/user-attachments/assets/9687c232-9708-464b-996f-ec34c64652e4" />#  Osprey
+#  Osprey
 
 https://www.purplelotus.space/blog/introducing-osprey
 
