@@ -119,10 +119,24 @@ export async function detectAndFetchPackageFile(
     // Python not found, continue
   }
 
+  // Fallback to package.json (less precise than lock files, but better than nothing)
+  try {
+    const pkgJson = await fetchGitHubFile(
+      owner,
+      repo,
+      basePath ? `${basePath}/package.json` : "package.json",
+      { branch, token: options?.token }
+    );
+    console.warn("⚠ Using package.json (no lock file found). Version ranges may be imprecise.");
+    return { ecosystem: "npm", content: pkgJson, fileName: "package.json" };
+  } catch {
+    // package.json not found either
+  }
+
   // No supported package file found
   throw new Error(
     `No supported package file found in ${owner}/${repo}${basePath ? `/${basePath}` : ""}. ` +
-    `Supported files: package-lock.json (npm), requirements.txt (Python)`
+    `Supported files: package-lock.json, package.json (npm), requirements.txt (Python)`
   );
 }
 
