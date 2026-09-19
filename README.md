@@ -1,6 +1,7 @@
 #  Osprey
 
-<img width="352" height="223" alt="image" src="https://github.com/user-attachments/assets/7b10c1d8-fdf0-4d7a-aa8d-4909dd7f87b0" />
+<img width="1024" height="435" alt="image" src="https://github.com/user-attachments/assets/4fd5f84e-4c21-4cd9-a5b6-5d89997eb93f" />
+
 
 
 https://www.purplelotus.space/blog/introducing-osprey
