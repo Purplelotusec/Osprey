@@ -20,6 +20,7 @@ export interface NormalizedSbom {
   subjectName: string; // e.g. the repo/package name this SBOM describes
   subjectVersion?: string;
   components: NormalizedComponent[];
+  sourceFile?: string; // e.g. "package-lock.json", "package.json", "requirements.txt"
 }
 
 export interface SbomRecord {

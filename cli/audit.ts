@@ -50,6 +50,9 @@ program
     try {
       console.log(`Auditing: ${subjectName}\n`);
 
+      // Store sourceFile for passing to runKevCheck
+      let capturedSourceFile: string | undefined;
+
       // Run KEV check
       const result = await runKevCheck({
         subjectName,
@@ -61,13 +64,16 @@ program
             console.log("Analyzing repository...");
             const repoInfo = parseGitHubUrl(options.url);
             const sbomResult = await generateSbomFromGitHub({ repoInfo, token: githubToken });
+            capturedSourceFile = sbomResult.sbom.sourceFile;
             return sbomResult.sbom.components;
           } else {
             console.log("Analyzing project...");
             const sbomResult = generateSbom({ projectDir: resolve(options.path) });
+            capturedSourceFile = sbomResult.sbom.sourceFile;
             return sbomResult.sbom.components;
           }
         },
+        getSourceFile: () => capturedSourceFile,
         pollKev: async () => {
           console.log("Checking for vulnerabilities...");
           const snapshot = await pollKev({

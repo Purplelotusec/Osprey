@@ -26,16 +26,19 @@ export function generateSbom(opts: GenerateOptions): GenerateResult {
   let subjectName: string;
   let subjectVersion: string | undefined;
   let components: NormalizedComponent[];
+  let sourceFile: string | undefined;
 
   if (ecosystem === "npm") {
     const result = generateFromNpmProject(opts.projectDir);
     subjectName = result.subjectName;
     subjectVersion = result.subjectVersion;
     components = result.components;
+    sourceFile = result.sourceFile;
   } else if (ecosystem === "python") {
     const result = generateFromRequirementsTxt(opts.projectDir);
     subjectName = result.subjectName;
     components = result.components;
+    sourceFile = "requirements.txt";
     if (result.skippedLines.length > 0) {
       warnings.push(
         `Skipped ${result.skippedLines.length} requirements.txt line(s) without an exact pin (==): ` +
@@ -59,6 +62,7 @@ export function generateSbom(opts: GenerateOptions): GenerateResult {
     subjectName,
     subjectVersion,
     components,
+    sourceFile,
   };
 
   return { sbom, warnings };

@@ -24,6 +24,7 @@ export interface NpmGenerationResult {
   subjectName: string;
   subjectVersion?: string;
   components: NormalizedComponent[];
+  sourceFile?: string;
 }
 
 /**
@@ -54,6 +55,7 @@ export function generateFromNpmProject(projectDir: string): NpmGenerationResult 
       subjectName: pkgJson.name ?? "unknown-npm-project",
       subjectVersion: pkgJson.version,
       components,
+      sourceFile: "package-lock.json",
     };
   }
 
@@ -63,6 +65,7 @@ export function generateFromNpmProject(projectDir: string): NpmGenerationResult 
     subjectName: pkgJson.name ?? "unknown-npm-project",
     subjectVersion: pkgJson.version,
     components,
+    sourceFile: "package.json",
   };
 }
 
