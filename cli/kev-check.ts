@@ -61,8 +61,8 @@ program
     });
 
     writeResult(resultPath, result);
-    if (result.status === "failed" && result.highConfidenceMatchCount > 0 && options.failOnHigh) {
-      console.error(`\n${result.highConfidenceMatchCount} high-confidence match(es) — failing per --fail-on-high.`);
+    if (result.status === "failed" && result.affectedCount > 0 && options.failOnHigh) {
+      console.error(`\n${result.affectedCount} actively exploited vulnerable package(s) — failing per --fail-on-high.`);
     }
     if (result.status === "failed") {
       for (const error of result.errors) console.error(`Error: ${error}`);

@@ -112,7 +112,8 @@ program
       console.log(`Audit completed in ${(duration / 1000).toFixed(2)}s\n`);
 
       // Exit with appropriate code
-      if (options.failOnHigh && result.highConfidenceMatchCount > 0) {
+      if (options.failOnHigh && result.affectedCount > 0) {
+        console.error(`\nFound ${result.affectedCount} actively exploited vulnerable package(s).`);
         process.exit(1);
       }
 
