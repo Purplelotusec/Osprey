@@ -1,5 +1,7 @@
 # 🦅 Osprey
 
+https://www.purplelotus.space/blog/introducing-osprey
+
 **SBOM generation, signing, and CISA KEV vulnerability detection for your dependencies.**
 
 Osprey is a CLI (`cra`) that builds a Software Bill of Materials (SBOM) from your project, cross-checks every component against the [CISA Known Exploited Vulnerabilities (KEV)](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) catalog, and tells you which dependencies are *actively exploited in the wild*, not merely "have a CVE".
