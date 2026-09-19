@@ -1,6 +1,6 @@
-import { parsePurl } from "../sbom/purl.js";
 import type { NormalizedComponent } from "../sbom/types.js";
 import type { KevEntry } from "../vulnerability/types.js";
+import type { OsvAdvisory } from "../vulnerability/osv.js";
 
 export type MatchConfidence = "high" | "low";
 
@@ -8,57 +8,85 @@ export interface CrossCheckMatch {
   component: NormalizedComponent;
   kevEntry: KevEntry;
   confidence: MatchConfidence;
-  matchedOn: "purl_ecosystem_name" | "vendor_product_name";
+  matchedOn: "cve_from_osv" | "cve_direct";
 }
 
 /**
- * Confidence tiers matter downstream (see the awareness/clock discussion):
+ * CVE-based cross-checking strategy:
  *
- * - "high": the component's PURL ecosystem/name lines up closely with the
- *   KEV entry's vendor/product AND the component identity came from a real
- *   package manager (PURL present) — as close to "this exact thing is
- *   shipped" as free-text KEV data allows.
- * - "low": only a loose vendor/product name match, no PURL corroboration —
- *   treat this as a lead a human should look at, not a confirmed hit.
+ * We NO LONGER match by fuzzy name comparison (too many false positives).
+ * Instead, we:
+ * 1. Query OSV for vulnerabilities in each package
+ * 2. Extract CVE IDs from OSV advisories
+ * 3. Check if those CVE IDs appear in CISA KEV
+ * 4. Only report packages where OSV CVE = KEV CVE (actively exploited)
  *
- * CISA KEV entries carry a CVE plus free-text vendor/product names, not a
- * machine-precise CPE/version range — so even "high" here is not the same
- * guarantee an exact CPE-range match from NVD would give. Upgrading to an
- * NVD/OSV-backed provider with real affected-version ranges is the natural
- * next step once this proves out.
+ * This ensures we only flag packages with CONFIRMED vulnerabilities that
+ * are ACTUALLY being exploited in the wild according to CISA.
  */
-export function crossCheck(components: NormalizedComponent[], kevEntries: KevEntry[]): CrossCheckMatch[] {
+export function crossCheckWithAdvisories(
+  components: NormalizedComponent[],
+  kevEntries: KevEntry[],
+  advisoriesByPackage: Map<string, OsvAdvisory[]>
+): CrossCheckMatch[] {
   const matches: CrossCheckMatch[] = [];
+  const kevCveMap = new Map<string, KevEntry>();
 
+  // Index KEV entries by CVE ID for fast lookup
+  for (const entry of kevEntries) {
+    kevCveMap.set(entry.cveId.toUpperCase(), entry);
+  }
+
+  // For each component, check if its OSV vulnerabilities appear in KEV
   for (const component of components) {
-    for (const entry of kevEntries) {
-      const match = evaluateMatch(component, entry);
-      if (match) matches.push(match);
+    const packageName = getPackageName(component);
+    if (!packageName) continue;
+
+    const advisories = advisoriesByPackage.get(packageName) ?? [];
+
+    for (const advisory of advisories) {
+      // Check if this advisory's CVE is in CISA KEV
+      const cveIds = extractCveIds(advisory);
+
+      for (const cveId of cveIds) {
+        const kevEntry = kevCveMap.get(cveId.toUpperCase());
+        if (kevEntry) {
+          // This CVE is actively exploited!
+          matches.push({
+            component,
+            kevEntry,
+            confidence: "high", // High confidence because it's based on exact CVE match
+            matchedOn: "cve_from_osv",
+          });
+        }
+      }
     }
   }
 
   return matches;
 }
 
-function evaluateMatch(component: NormalizedComponent, entry: KevEntry): CrossCheckMatch | null {
-  const componentName = component.name.toLowerCase();
-  const productName = entry.product.toLowerCase();
-  const vendorName = entry.vendorProject.toLowerCase();
+function extractCveIds(advisory: OsvAdvisory): string[] {
+  const cves: string[] = [];
 
-  const nameMatchesProduct = componentName === productName;
-  const nameMatchesVendor = component.vendor?.toLowerCase() === vendorName;
+  // Check advisory ID itself
+  if (advisory.id.startsWith("CVE-")) {
+    cves.push(advisory.id);
+  }
 
-  if (!nameMatchesProduct && !nameMatchesVendor) return null;
+  // Check aliases
+  for (const alias of advisory.aliases ?? []) {
+    if (alias.startsWith("CVE-")) {
+      cves.push(alias);
+    }
+  }
 
-  // "High" confidence requires a PURL-backed identity (came from an actual
-  // lockfile, not guesswork) AND the exact product-name match, not just
-  // the looser vendor match.
-  const confidence: MatchConfidence = component.purl && nameMatchesProduct ? "high" : "low";
+  return cves;
+}
 
-  return {
-    component,
-    kevEntry: entry,
-    confidence,
-    matchedOn: component.purl && nameMatchesProduct ? "purl_ecosystem_name" : "vendor_product_name",
-  };
+function getPackageName(component: NormalizedComponent): string | undefined {
+  if (component.ecosystem === "npm") {
+    return component.namespace ? `${component.namespace}/${component.name}` : component.name;
+  }
+  return undefined;
 }
