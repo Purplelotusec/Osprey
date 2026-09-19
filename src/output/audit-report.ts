@@ -13,7 +13,7 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
   console.log(section("SBOM Vulnerability Audit Report"));
   console.log(`Subject: ${dim(result.subjectName)}`);
   console.log(`Components analyzed: ${result.sbomComponentCount}`);
-  console.log(`KEV entries checked: ${result.kevSnapshot.entryCount} (as of ${result.kevSnapshot.dateReleased ?? result.kevSnapshot.fetchedAt})`);
+  console.log(`Analyzed KEVs: ${result.kevSnapshot.entryCount}`);
   console.log();
 
   // Overall status - VERSION-AWARE
