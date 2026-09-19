@@ -10,10 +10,8 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
   const { verbose = false, showLowConfidence = true } = options;
 
   // Header
-  console.log(section("SBOM Vulnerability Audit Report"));
-  console.log(`Subject: ${dim(result.subjectName)}`);
-  console.log(`Components analyzed: ${result.sbomComponentCount}`);
-  console.log(`Analyzed KEVs: ${result.kevSnapshot.entryCount}`);
+  console.log(section("Vulnerability Audit"));
+  console.log(`${result.sbomComponentCount} components analyzed`);
   console.log();
 
   // Overall status - VERSION-AWARE
@@ -22,17 +20,16 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
   const hasUnknown = result.unknownCount > 0;
 
   if (!hasAffected && !hasNotAffected && !hasUnknown) {
-    console.log(colorize(`${symbols.success} No active exploitable vulnerabilities detected`, "green"));
-    console.log(dim("All components are clear of known exploited vulnerabilities."));
+    console.log(colorize(`${symbols.success} No vulnerabilities found`, "green"));
   } else {
     if (hasAffected) {
-      console.log(colorize(`${symbols.error} ${result.affectedCount} VULNERABLE package(s) actively exploited`, "red"));
+      console.log(colorize(`${symbols.error} ${result.affectedCount} vulnerable package(s)`, "red"));
     }
     if (hasNotAffected) {
-      console.log(colorize(`${symbols.success} ${result.notAffectedCount} package(s) with CVE but version is SAFE (patched)`, "green"));
+      console.log(colorize(`${symbols.success} ${result.notAffectedCount} safe (patched)`, "green"));
     }
     if (hasUnknown) {
-      console.log(colorize(`${symbols.warning} ${result.unknownCount} package(s) with UNKNOWN version status`, "yellow"));
+      console.log(colorize(`${symbols.warning} ${result.unknownCount} unknown`, "yellow"));
     }
     console.log();
   }
@@ -69,15 +66,13 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
     }
   }
 
-  // Summary
-  console.log(section("Summary"));
-  const status = result.affectedCount > 0 ? colorize("FAILED", "red") : colorize("PASSED", "green");
-  console.log(`Status: ${status}`);
-  console.log(`Total CVE matches: ${result.matches.length}`);
-  console.log(`  - ${colorize("Affected (VULNERABLE)", "red")}: ${result.affectedCount}`);
-  console.log(`  - ${colorize("Not Affected (SAFE)", "green")}: ${result.notAffectedCount}`);
-  console.log(`  - ${colorize("Unknown status", "yellow")}: ${result.unknownCount}`);
-  console.log();
+  // Summary (only show if verbose or has issues)
+  if (verbose || result.affectedCount > 0 || result.matches.length > 0) {
+    console.log(section("Summary"));
+    const status = result.affectedCount > 0 ? colorize("FAILED", "red") : colorize("PASSED", "green");
+    console.log(`Status: ${status}`);
+    console.log();
+  }
 }
 
 interface FindingsPrintOptions {
