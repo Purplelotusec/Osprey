@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { homedir } from "node:os";
 import { pollKev } from "../src/vulnerability/kev.js";
-import { crossCheck } from "../src/correlation/matcher.js";
+import { crossCheckWithAdvisories } from "../src/correlation/matcher.js";
 import { generateSbom } from "../src/sbom/generate/index.js";
 import { generateSbomFromGitHub } from "../src/sbom/generate/remote.js";
 import { parseGitHubUrl } from "../src/network/github.js";
@@ -79,9 +79,9 @@ program
           console.log(`Loaded ${snapshot.entries.length} KEV entries (as of ${snapshot.dateReleased ?? snapshot.fetchedAt})\n`);
           return snapshot;
         },
-        crossCheck: (components, entries) => {
+        crossCheck: (components, entries, advisories) => {
           console.log("Cross-checking components against KEV database...\n");
-          return crossCheck(components, entries);
+          return crossCheckWithAdvisories(components, entries, advisories);
         },
         sendAlert: async () => {
           // No webhook alert in audit command
