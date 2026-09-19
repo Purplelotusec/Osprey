@@ -38,7 +38,7 @@ Osprey is a CLI (`cra`) that builds a Software Bill of Materials (SBOM) from you
 ## Quick Start
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/Purplelotusec/Osprey
 cd osprey
 npm install      # builds automatically via the "prepare" script
 npm link         # optional: installs cra, cra-audit, cra-sbom, cra-kev, cra-report globally
