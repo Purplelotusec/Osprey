@@ -1,0 +1,13 @@
+[tool.poetry]
+name = "example-poetry-app"
+version = "1.4.0"
+description = "Fixture"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+Django = "^4.2"
+internal-tool = { git = "https://github.com/example/internal-tool.git" }
+corp-utils = { version = "^3.1", source = "corp" }
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8"

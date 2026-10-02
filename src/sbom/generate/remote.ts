@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { generateSbom, type GenerateResult } from "./index.js";
 import type { GitHubRepoInfo } from "../../network/github.js";
-import { detectAndFetchPackageFile, fetchPackageJson } from "../../network/github.js";
+import { detectAndFetchPackageFile, fetchOptionalGitHubFile, fetchPackageJson } from "../../network/github.js";
 
 export interface RemoteGenerationOptions {
   repoInfo: GitHubRepoInfo;
@@ -35,6 +35,13 @@ export async function generateSbomFromGitHub(options: RemoteGenerationOptions): 
       } catch {
         // package.json is optional for our purposes
       }
+    }
+
+    // Python lockfiles take the project name and direct dependencies from
+    // pyproject.toml; without it the SBOM is still complete, just less labelled.
+    if (packageFile.fileName === "uv.lock" || packageFile.fileName === "poetry.lock") {
+      const pyproject = await fetchOptionalGitHubFile(repoInfo, "pyproject.toml", { token });
+      if (pyproject !== undefined) writeFileSync(join(tempDir, "pyproject.toml"), pyproject, "utf-8");
     }
 
     // Generate SBOM from temp directory

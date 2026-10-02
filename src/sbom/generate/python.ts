@@ -1,7 +1,74 @@
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { buildPurl } from "../purl.js";
+import { generateFromUvLock } from "./uv.js";
+import { generateFromPoetryLock } from "./poetry.js";
 import type { NormalizedComponent } from "../types.js";
+
+/** What a lockfile parser returns; the subject falls back to the directory name. */
+export interface PythonLockfileResult {
+  subjectName?: string;
+  subjectVersion?: string;
+  components: NormalizedComponent[];
+  /** Packages left out of the SBOM, each with the reason, so the caller can warn. */
+  skipped: string[];
+}
+
+export interface PythonProjectResult {
+  manifest: PythonManifest;
+  subjectName: string;
+  subjectVersion?: string;
+  components: NormalizedComponent[];
+  warnings: string[];
+}
+
+/**
+ * Python manifests in order of preference. Lockfiles come first: they pin every
+ * package, transitive ones included, whereas requirements.txt is only as
+ * complete as whoever wrote it.
+ */
+export const PYTHON_MANIFESTS = ["uv.lock", "poetry.lock", "requirements.txt"] as const;
+export type PythonManifest = (typeof PYTHON_MANIFESTS)[number];
+
+export function detectPythonManifest(projectDir: string): PythonManifest | undefined {
+  return PYTHON_MANIFESTS.find((manifest) => existsSync(join(projectDir, manifest)));
+}
+
+export function generateFromPythonProject(projectDir: string): PythonProjectResult {
+  const manifest = detectPythonManifest(projectDir);
+  if (!manifest) {
+    throw new Error(`No Python manifest found in ${projectDir} — looked for ${PYTHON_MANIFESTS.join(", ")}.`);
+  }
+  const fallbackName = basename(resolve(projectDir)) || "unknown-python-project";
+
+  if (manifest === "requirements.txt") {
+    const result = generateFromRequirementsTxt(projectDir);
+    const warnings = result.skippedLines.length > 0
+      ? [
+          `Skipped ${result.skippedLines.length} requirements.txt line(s) without an exact pin (==): ` +
+            result.skippedLines.slice(0, 5).join(", ") +
+            (result.skippedLines.length > 5 ? ", ..." : ""),
+        ]
+      : [];
+    return { manifest, subjectName: result.subjectName, components: result.components, warnings };
+  }
+
+  const result = manifest === "uv.lock" ? generateFromUvLock(projectDir) : generateFromPoetryLock(projectDir);
+  const warnings = result.skipped.length > 0
+    ? [
+        `Skipped ${result.skipped.length} ${manifest} package(s) not installed from a package index: ` +
+          result.skipped.slice(0, 5).join(", ") +
+          (result.skipped.length > 5 ? ", ..." : ""),
+      ]
+    : [];
+  return {
+    manifest,
+    subjectName: result.subjectName ?? fallbackName,
+    subjectVersion: result.subjectVersion,
+    components: result.components,
+    warnings,
+  };
+}
 
 export interface PythonGenerationResult {
   subjectName: string;
@@ -19,8 +86,8 @@ const PINNED_LINE = /^([A-Za-z0-9][A-Za-z0-9._-]*)\s*==\s*([^\s;#]+)/;
  * requirements, or `-r other.txt` includes — those don't have a single
  * resolved version to record, and guessing one would produce a
  * confidently wrong SBOM rather than an honestly incomplete one.
- * For projects using Poetry/Pipenv, generate from their lockfile instead
- * (poetry.lock / Pipfile.lock) — not yet implemented here.
+ * uv and Poetry projects are read from their lockfiles instead (uv.ts,
+ * poetry.ts); Pipfile.lock is not yet supported.
  */
 export function generateFromRequirementsTxt(projectDir: string): PythonGenerationResult {
   const reqPath = join(projectDir, "requirements.txt");
@@ -55,7 +122,7 @@ export function generateFromRequirementsTxt(projectDir: string): PythonGeneratio
   }
 
   return {
-    subjectName: projectDir.split("/").filter(Boolean).pop() ?? "unknown-python-project",
+    subjectName: basename(resolve(projectDir)) || "unknown-python-project",
     components,
     skippedLines,
   };

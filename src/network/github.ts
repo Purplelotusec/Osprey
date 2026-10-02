@@ -58,8 +58,10 @@ export async function fetchGitHubFile(
   filePath: string,
   options?: { branch?: string; token?: string }
 ): Promise<string> {
-  const branch = options?.branch ?? "main";
-  const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
+  // "HEAD" resolves to the repository's default branch. Guessing main/master
+  // instead can silently audit a stale branch (e.g. a repo whose default is "dev").
+  const ref = options?.branch ?? "HEAD";
+  const url = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${filePath}`;
 
   const headers: Record<string, string> = {
     "User-Agent": "osprey-sbom-audit",
@@ -69,74 +71,53 @@ export async function fetchGitHubFile(
     headers["Authorization"] = `Bearer ${options.token}`;
   }
 
+  return fetchText(url, { headers }, {});
+}
+
+/** Fetches a file if it exists, or returns undefined (any fetch failure counts as absent). */
+export async function fetchOptionalGitHubFile(
+  repoInfo: GitHubRepoInfo,
+  fileName: string,
+  options?: { token?: string }
+): Promise<string | undefined> {
+  const { owner, repo, branch, path } = repoInfo;
   try {
-    return await fetchText(url, { headers }, {});
-  } catch (error) {
-    // Try 'master' branch if 'main' fails and no explicit branch was specified
-    if (!options?.branch && branch === "main") {
-      const masterUrl = `https://raw.githubusercontent.com/${owner}/${repo}/master/${filePath}`;
-      try {
-        return await fetchText(masterUrl, { headers }, {});
-      } catch {
-        // Rethrow original error
-        throw error;
-      }
-    }
-    throw error;
+    return await fetchGitHubFile(owner, repo, path ? `${path}/${fileName}` : fileName, { branch, token: options?.token });
+  } catch {
+    return undefined;
   }
 }
+
+/**
+ * Manifests looked for in a remote repository, most precise first: lockfiles
+ * pin every package at its resolved version; package.json only has ranges.
+ */
+const REMOTE_MANIFESTS: Array<{ fileName: string; ecosystem: "npm" | "python" }> = [
+  { fileName: "package-lock.json", ecosystem: "npm" },
+  { fileName: "uv.lock", ecosystem: "python" },
+  { fileName: "poetry.lock", ecosystem: "python" },
+  { fileName: "requirements.txt", ecosystem: "python" },
+  { fileName: "package.json", ecosystem: "npm" },
+];
 
 export async function detectAndFetchPackageFile(
   repoInfo: GitHubRepoInfo,
   options?: { token?: string }
 ): Promise<{ ecosystem: "npm" | "python"; content: string; fileName: string }> {
-  const { owner, repo, branch, path } = repoInfo;
-  const basePath = path ?? "";
+  const { owner, repo, path } = repoInfo;
 
-  // Try npm first (package-lock.json)
-  try {
-    const lockFile = await fetchGitHubFile(
-      owner,
-      repo,
-      basePath ? `${basePath}/package-lock.json` : "package-lock.json",
-      { branch, token: options?.token }
-    );
-    return { ecosystem: "npm", content: lockFile, fileName: "package-lock.json" };
-  } catch {
-    // npm not found, continue
+  for (const { fileName, ecosystem } of REMOTE_MANIFESTS) {
+    const content = await fetchOptionalGitHubFile(repoInfo, fileName, options);
+    if (content === undefined) continue;
+    if (fileName === "package.json") {
+      console.warn("⚠ Using package.json (no lock file found). Version ranges may be imprecise.");
+    }
+    return { ecosystem, content, fileName };
   }
 
-  // Try Python (requirements.txt)
-  try {
-    const reqFile = await fetchGitHubFile(
-      owner,
-      repo,
-      basePath ? `${basePath}/requirements.txt` : "requirements.txt",
-      { branch, token: options?.token }
-    );
-    return { ecosystem: "python", content: reqFile, fileName: "requirements.txt" };
-  } catch {
-    // Python not found, continue
-  }
-
-  // Fallback to package.json (less precise than lock files, but better than nothing)
-  try {
-    const pkgJson = await fetchGitHubFile(
-      owner,
-      repo,
-      basePath ? `${basePath}/package.json` : "package.json",
-      { branch, token: options?.token }
-    );
-    console.warn("⚠ Using package.json (no lock file found). Version ranges may be imprecise.");
-    return { ecosystem: "npm", content: pkgJson, fileName: "package.json" };
-  } catch {
-    // package.json not found either
-  }
-
-  // No supported package file found
   throw new Error(
-    `No supported package file found in ${owner}/${repo}${basePath ? `/${basePath}` : ""}. ` +
-    `Supported files: package-lock.json, package.json (npm), requirements.txt (Python)`
+    `No supported package file found in ${owner}/${repo}${path ? `/${path}` : ""}. ` +
+    `Supported files: package-lock.json, package.json (npm), uv.lock, poetry.lock, requirements.txt (Python)`
   );
 }
 

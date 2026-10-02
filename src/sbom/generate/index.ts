@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { generateFromNpmProject } from "./npm.js";
-import { generateFromRequirementsTxt } from "./python.js";
+import { detectPythonManifest, generateFromPythonProject, PYTHON_MANIFESTS } from "./python.js";
 import type { NormalizedComponent, NormalizedSbom } from "../types.js";
 
 const TOOL_NAME = "osprey-sbom-gen";
@@ -33,19 +33,14 @@ export function generateSbom(opts: GenerateOptions): GenerateResult {
     subjectVersion = result.subjectVersion;
     components = result.components;
   } else if (ecosystem === "python") {
-    const result = generateFromRequirementsTxt(opts.projectDir);
+    const result = generateFromPythonProject(opts.projectDir);
     subjectName = result.subjectName;
+    subjectVersion = result.subjectVersion;
     components = result.components;
-    if (result.skippedLines.length > 0) {
-      warnings.push(
-        `Skipped ${result.skippedLines.length} requirements.txt line(s) without an exact pin (==): ` +
-          result.skippedLines.slice(0, 5).join(", ") +
-          (result.skippedLines.length > 5 ? ", ..." : "")
-      );
-    }
+    warnings.push(...result.warnings);
   } else {
     throw new Error(
-      `Could not detect a supported project type in ${opts.projectDir} — looked for package-lock.json (npm) and requirements.txt (Python). Pass --ecosystem to force one, or generate the SBOM from another tool and use the ingestion path instead.`
+      `Could not detect a supported project type in ${opts.projectDir} — looked for package-lock.json (npm) and ${PYTHON_MANIFESTS.join(", ")} (Python). Pass --ecosystem to force one, or generate the SBOM from another tool and use the ingestion path instead.`
     );
   }
 
@@ -66,7 +61,7 @@ export function generateSbom(opts: GenerateOptions): GenerateResult {
 
 function detectEcosystem(projectDir: string): "npm" | "python" | null {
   if (existsSync(join(projectDir, "package-lock.json"))) return "npm";
-  if (existsSync(join(projectDir, "requirements.txt"))) return "python";
+  if (detectPythonManifest(projectDir)) return "python";
   return null;
 }
 

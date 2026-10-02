@@ -1,0 +1,10 @@
+[project]
+name = "example-uv-app"
+dynamic = ["version"]
+dependencies = ["requests>=2.32,<3", "internal-lib"]
+
+[project.optional-dependencies]
+fast = ["numpy"]
+
+[dependency-groups]
+dev = ["pytest>=8"]

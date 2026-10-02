@@ -264,7 +264,7 @@ To remove global commands installed with `npm link`:
 npm unlink -g <package-name>
 ```
 
-Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, and `@aws-sdk/client-s3`.
+Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `smol-toml` (zero-dependency TOML parser for Python lockfiles), and `@aws-sdk/client-s3`.
 
 ---
 
@@ -273,13 +273,20 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, an
 ### What works today
 
 - **npm:** full `package-lock.json` (v1, v2, v3) parsing, including direct vs. transitive dependencies, scoped packages, and deduplication.
-- **Python:** `requirements.txt` with exact pins (`pkg==1.2.3`). Ranges and VCS lines are skipped and reported, never guessed.
+- **Python:** detected in this order of preference:
+  - `uv.lock`: every registry package at its resolved version, transitive dependencies included. Direct dependencies come from the workspace member's dependencies, extras and dev groups.
+  - `poetry.lock`: every PyPI or alternate-index package. Direct dependencies come from `pyproject.toml` (`[project]`, `[dependency-groups]`, `[tool.poetry]`) when present.
+  - `requirements.txt` with exact pins (`pkg==1.2.3`). Ranges and VCS lines are skipped and reported, never guessed.
+
+  Git, URL and local-path packages in a lockfile are skipped and reported as warnings, because they aren't the PyPI release a `pkg:pypi` PURL would claim.
+- **Remote auditing (`--url`):** reads the repository's default branch unless a `/tree/<branch>` is given, and looks for `package-lock.json`, `uv.lock`, `poetry.lock`, `requirements.txt`, then `package.json`.
 - **Signing:** Ed25519 over DSSE pre-authentication encoding. Changing one byte of a signed SBOM, or verifying with the wrong key, fails verification.
 - **KEV polling:** Zod schema validation plus local caching, so a network failure can't silently report "no vulnerabilities".
 
 ### Known limitations
 
-- **Lockfile coverage:** no `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `go.sum`, or `Cargo.lock` support yet.
+- **Lockfile coverage:** no `yarn.lock`, `pnpm-lock.yaml`, `Pipfile.lock`, `pdm.lock`, `go.sum`, or `Cargo.lock` support yet. `pyproject.toml` alone (without a lockfile) isn't used for versions, since it only declares ranges.
+- **One ecosystem per project:** a directory with both `package-lock.json` and a Python manifest is audited as npm only.
 - **No CPE matching:** KEV's free-text fields are the only matching signal. An NVD/OSV-backed provider with real affected-version ranges would sharpen the `low` tier.
 - **PyPI version ranges:** OSV range evaluation uses semver ordering, so PEP 440 versions that are not semver (e.g. `2.0`, `4.2rc1`) are only reported `affected` on an exact listed-version hit and otherwise `unknown`.
 - **Local-key signing:** Ed25519 with local keys, not Sigstore keyless or a transparency log. The envelope shape stays the same if you upgrade to cosign later.
