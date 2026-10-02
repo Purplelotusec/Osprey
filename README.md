@@ -253,7 +253,7 @@ The GitHub Actions reporter (`cra-report`) turns this result into a job summary,
 
 ```bash
 npm install     # also builds
-npm test        # runs the test suite (49 tests)
+npm test        # runs the test suite
 ```
 
 The tests cover npm/Python SBOM generation, signing round-trips, tamper detection, wrong-key rejection, confidence tiering, npm/OSV version evaluation, and reporting.
