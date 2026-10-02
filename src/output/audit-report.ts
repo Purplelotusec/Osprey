@@ -19,8 +19,13 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
   const hasAffected = result.affectedCount > 0;
   const hasNotAffected = result.notAffectedCount > 0;
   const hasUnknown = result.unknownCount > 0;
+  const incomplete = isIncomplete(result);
 
-  if (!hasAffected && !hasNotAffected && !hasUnknown) {
+  if (incomplete) {
+    // Zero findings from a run that never finished is not a clean result — never render it as one.
+    console.log(colorize(`${symbols.error} Audit incomplete — results cannot be trusted (see Errors below)`, "red"));
+    console.log();
+  } else if (!hasAffected && !hasNotAffected && !hasUnknown) {
     console.log(colorize(`${symbols.success} No vulnerabilities found`, "green"));
   } else {
     if (hasAffected) {
@@ -68,12 +73,22 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
   }
 
   // Summary (only show if verbose or has issues)
-  if (verbose || result.affectedCount > 0 || result.matches.length > 0) {
+  if (verbose || incomplete || result.affectedCount > 0 || result.matches.length > 0) {
     console.log(section("Summary"));
-    const status = result.affectedCount > 0 ? colorize("FAILED", "red") : colorize("PASSED", "green");
-    console.log(`Status: ${status}`);
+    console.log(`Status: ${statusLabel(result)}`);
     console.log();
   }
+}
+
+/** A run that hit an error (failed stage) never produced a complete answer, whatever its counts say. */
+function isIncomplete(result: SboimResult): boolean {
+  return result.errors.length > 0 || Object.values(result.stages).some((stage) => stage.status === "failed");
+}
+
+function statusLabel(result: SboimResult): string {
+  if (isIncomplete(result)) return colorize("FAILED (audit incomplete)", "red");
+  if (result.status === "failed" || result.affectedCount > 0) return colorize("FAILED", "red");
+  return colorize("PASSED", "green");
 }
 
 interface FindingsPrintOptions {
@@ -178,6 +193,15 @@ function getVersionStatusText(finding: SecurityFinding): string {
 export function printAuditSummary(result: SboimResult): void {
   const hasAffected = result.affectedCount > 0;
   const hasMatches = result.matches.length > 0;
+
+  if (isIncomplete(result)) {
+    console.log(colorize(`\n${symbols.error} Audit incomplete — results cannot be trusted`, "red"));
+    for (const error of result.errors) {
+      console.log(colorize(`  ${symbols.error} ${error}`, "red"));
+    }
+    console.log();
+    return;
+  }
 
   if (!hasMatches) {
     console.log(colorize(`\n${symbols.success} No active exploitable vulnerabilities detected\n`, "green"));
