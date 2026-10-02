@@ -8,41 +8,57 @@ import type { NormalizedComponent, NormalizedSbom } from "../types.js";
 const TOOL_NAME = "osprey-sbom-gen";
 const TOOL_VERSION = "0.1.0";
 
+export const ECOSYSTEMS = ["npm", "python"] as const;
+export type Ecosystem = (typeof ECOSYSTEMS)[number];
+
 export interface GenerateOptions {
   projectDir: string;
-  /** Force a specific generator instead of auto-detecting. */
-  ecosystem?: "npm" | "python";
+  /** Generate only this ecosystem instead of every one detected. */
+  ecosystem?: Ecosystem;
+  /** Generate exactly these ecosystems (used when the caller already knows what it fetched). */
+  ecosystems?: Ecosystem[];
 }
 
 export interface GenerateResult {
   sbom: NormalizedSbom;
   warnings: string[];
+  /** The ecosystems whose dependencies are in the SBOM, in generation order. */
+  ecosystems: Ecosystem[];
 }
 
+interface EcosystemResult {
+  subjectName: string;
+  subjectVersion?: string;
+  components: NormalizedComponent[];
+  warnings: string[];
+}
+
+const GENERATORS: Record<Ecosystem, (projectDir: string) => EcosystemResult> = {
+  npm: (dir) => ({ ...generateFromNpmProject(dir), warnings: [] }),
+  python: generateFromPythonProject,
+};
+
+/**
+ * Generates one SBOM covering every ecosystem in the project. Repositories
+ * commonly mix them (a Django or Flask backend with an npm-built frontend), and
+ * auditing only one would leave the other's dependencies silently unchecked.
+ * Components keep their own ecosystem (PURL type), so the merged list never
+ * conflates an npm package with a same-named PyPI one.
+ */
 export function generateSbom(opts: GenerateOptions): GenerateResult {
-  const ecosystem = opts.ecosystem ?? detectEcosystem(opts.projectDir);
-  const warnings: string[] = [];
-
-  let subjectName: string;
-  let subjectVersion: string | undefined;
-  let components: NormalizedComponent[];
-
-  if (ecosystem === "npm") {
-    const result = generateFromNpmProject(opts.projectDir);
-    subjectName = result.subjectName;
-    subjectVersion = result.subjectVersion;
-    components = result.components;
-  } else if (ecosystem === "python") {
-    const result = generateFromPythonProject(opts.projectDir);
-    subjectName = result.subjectName;
-    subjectVersion = result.subjectVersion;
-    components = result.components;
-    warnings.push(...result.warnings);
-  } else {
+  if (opts.ecosystem !== undefined && !ECOSYSTEMS.includes(opts.ecosystem)) {
+    throw new Error(`Unsupported ecosystem "${opts.ecosystem}" — expected one of: ${ECOSYSTEMS.join(", ")}.`);
+  }
+  const ecosystems = opts.ecosystems ?? (opts.ecosystem ? [opts.ecosystem] : detectEcosystems(opts.projectDir));
+  if (ecosystems.length === 0) {
     throw new Error(
       `Could not detect a supported project type in ${opts.projectDir} — looked for package-lock.json (npm) and ${PYTHON_MANIFESTS.join(", ")} (Python). Pass --ecosystem to force one, or generate the SBOM from another tool and use the ingestion path instead.`
     );
   }
+
+  const results = ecosystems.map((ecosystem) => GENERATORS[ecosystem](opts.projectDir));
+  // The subject is the first ecosystem's project, in ECOSYSTEMS order, so it is stable.
+  const [primary] = results;
 
   const sbom: NormalizedSbom = {
     format: "CYCLONEDX_JSON",
@@ -51,18 +67,21 @@ export function generateSbom(opts: GenerateOptions): GenerateResult {
     createdAt: new Date().toISOString(),
     toolName: TOOL_NAME,
     toolVersion: TOOL_VERSION,
-    subjectName,
-    subjectVersion,
-    components,
+    subjectName: primary.subjectName,
+    subjectVersion: primary.subjectVersion,
+    components: results.flatMap((result) => result.components),
   };
 
-  return { sbom, warnings };
+  return { sbom, warnings: results.flatMap((result) => result.warnings), ecosystems };
 }
 
-function detectEcosystem(projectDir: string): "npm" | "python" | null {
-  if (existsSync(join(projectDir, "package-lock.json"))) return "npm";
-  if (detectPythonManifest(projectDir)) return "python";
-  return null;
+/** Every ecosystem with a supported manifest in the directory, in ECOSYSTEMS order. */
+export function detectEcosystems(projectDir: string): Ecosystem[] {
+  const present: Record<Ecosystem, boolean> = {
+    npm: existsSync(join(projectDir, "package-lock.json")),
+    python: detectPythonManifest(projectDir) !== undefined,
+  };
+  return ECOSYSTEMS.filter((ecosystem) => present[ecosystem]);
 }
 
 /**

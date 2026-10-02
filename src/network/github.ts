@@ -88,44 +88,69 @@ export async function fetchOptionalGitHubFile(
   }
 }
 
-/**
- * Manifests looked for in a remote repository, most precise first: lockfiles
- * pin every package at its resolved version; package.json only has ranges.
- * Python order mirrors local detection (src/sbom/generate/python.ts). Named
- * PEP 751 variants (pylock.<name>.toml) can't be discovered without listing
- * the directory, so only pylock.toml is looked for.
- */
-const REMOTE_MANIFESTS: Array<{ fileName: string; ecosystem: "npm" | "python" }> = [
-  { fileName: "package-lock.json", ecosystem: "npm" },
-  { fileName: "uv.lock", ecosystem: "python" },
-  { fileName: "poetry.lock", ecosystem: "python" },
-  { fileName: "pdm.lock", ecosystem: "python" },
-  { fileName: "pylock.toml", ecosystem: "python" },
-  { fileName: "Pipfile.lock", ecosystem: "python" },
-  { fileName: "requirements.lock", ecosystem: "python" },
-  { fileName: "requirements-dev.lock", ecosystem: "python" },
-  { fileName: "requirements.txt", ecosystem: "python" },
-  { fileName: "package.json", ecosystem: "npm" },
-];
+export type RemoteEcosystem = "npm" | "python";
 
-export async function detectAndFetchPackageFile(
+export interface RemotePackageFile {
+  ecosystem: RemoteEcosystem;
+  fileName: string;
+  content: string;
+}
+
+/**
+ * Manifests looked for in a remote repository, per ecosystem, most precise
+ * first. Python order mirrors local detection (src/sbom/generate/python.ts).
+ * Named PEP 751 variants (pylock.<name>.toml) can't be discovered without
+ * listing the directory, so only pylock.toml is looked for.
+ */
+const REMOTE_MANIFESTS: Record<RemoteEcosystem, string[]> = {
+  npm: ["package-lock.json"],
+  python: [
+    "uv.lock",
+    "poetry.lock",
+    "pdm.lock",
+    "pylock.toml",
+    "Pipfile.lock",
+    "requirements.lock",
+    "requirements-dev.lock",
+    "requirements.txt",
+  ],
+};
+
+/**
+ * Finds the preferred manifest of every ecosystem in the repository, so a mixed
+ * repo (e.g. a Python backend with an npm frontend) is audited in full.
+ * package.json is a last resort, used only when nothing else is found: it holds
+ * version ranges, and in a Python repo it is often just front-end tooling.
+ */
+export async function detectAndFetchPackageFiles(
   repoInfo: GitHubRepoInfo,
   options?: { token?: string }
-): Promise<{ ecosystem: "npm" | "python"; content: string; fileName: string }> {
+): Promise<RemotePackageFile[]> {
   const { owner, repo, path } = repoInfo;
 
-  for (const { fileName, ecosystem } of REMOTE_MANIFESTS) {
-    const content = await fetchOptionalGitHubFile(repoInfo, fileName, options);
-    if (content === undefined) continue;
-    if (fileName === "package.json") {
-      console.warn("⚠ Using package.json (no lock file found). Version ranges may be imprecise.");
-    }
-    return { ecosystem, content, fileName };
+  // Ecosystems are searched concurrently; within one, candidates go in preference order.
+  const found = await Promise.all(
+    (Object.entries(REMOTE_MANIFESTS) as Array<[RemoteEcosystem, string[]]>).map(async ([ecosystem, fileNames]) => {
+      for (const fileName of fileNames) {
+        const content = await fetchOptionalGitHubFile(repoInfo, fileName, options);
+        if (content !== undefined) return { ecosystem, fileName, content };
+      }
+      return undefined;
+    })
+  );
+  const files = found.filter((file): file is RemotePackageFile => file !== undefined);
+  if (files.length > 0) return files;
+
+  const packageJson = await fetchOptionalGitHubFile(repoInfo, "package.json", options);
+  if (packageJson !== undefined) {
+    console.warn("⚠ Using package.json (no lock file found). Version ranges may be imprecise.");
+    return [{ ecosystem: "npm", fileName: "package.json", content: packageJson }];
   }
 
+  const supported = [...Object.values(REMOTE_MANIFESTS).flat(), "package.json"];
   throw new Error(
     `No supported package file found in ${owner}/${repo}${path ? `/${path}` : ""}. ` +
-    `Supported files: ${REMOTE_MANIFESTS.map((manifest) => manifest.fileName).join(", ")}`
+    `Supported files: ${supported.join(", ")}`
   );
 }
 

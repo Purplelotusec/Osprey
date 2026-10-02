@@ -1,10 +1,10 @@
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, mkdtempSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { tmpdir } from "node:os";
 import { generateSbom, type GenerateResult } from "./index.js";
 import { findRequirementIncludes } from "./requirements.js";
 import type { GitHubRepoInfo } from "../../network/github.js";
-import { detectAndFetchPackageFile, fetchOptionalGitHubFile, fetchPackageJson } from "../../network/github.js";
+import { detectAndFetchPackageFiles, fetchOptionalGitHubFile, fetchPackageJson } from "../../network/github.js";
 
 export interface RemoteGenerationOptions {
   repoInfo: GitHubRepoInfo;
@@ -15,37 +15,35 @@ export async function generateSbomFromGitHub(options: RemoteGenerationOptions): 
   const { repoInfo, token } = options;
   const { owner, repo, branch, path } = repoInfo;
 
-  // Detect and fetch package files
-  const packageFile = await detectAndFetchPackageFile(repoInfo, { token });
+  // One preferred manifest per ecosystem present (npm and/or Python).
+  const packageFiles = await detectAndFetchPackageFiles(repoInfo, { token });
 
-  // Create temporary directory for files
-  const tempDir = join(tmpdir(), `osprey-${Date.now()}`);
-  mkdirSync(tempDir, { recursive: true });
+  const tempDir = mkdtempSync(join(tmpdir(), "osprey-"));
 
   try {
-    // Write package file to temp directory
-    const packageFilePath = join(tempDir, packageFile.fileName);
-    writeFileSync(packageFilePath, packageFile.content, "utf-8");
+    for (const packageFile of packageFiles) {
+      writeFileSync(join(tempDir, packageFile.fileName), packageFile.content, "utf-8");
 
-    // For npm, also fetch package.json if available
-    if (packageFile.ecosystem === "npm") {
-      try {
-        const pkgJson = await fetchPackageJson(owner, repo, { branch, path, token });
-        const pkgJsonPath = join(tempDir, "package.json");
-        writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2), "utf-8");
-      } catch {
-        // package.json is optional for our purposes
+      // npm lockfiles take the project name/version from package.json.
+      if (packageFile.fileName === "package-lock.json") {
+        try {
+          const pkgJson = await fetchPackageJson(owner, repo, { branch, path, token });
+          writeFileSync(join(tempDir, "package.json"), JSON.stringify(pkgJson, null, 2), "utf-8");
+        } catch {
+          // package.json is optional for our purposes
+        }
+      }
+
+      if (packageFile.ecosystem === "python") {
+        await fetchPythonCompanions(repoInfo, packageFile, tempDir, token);
       }
     }
 
-    if (packageFile.ecosystem === "python") {
-      await fetchPythonCompanions(repoInfo, packageFile, tempDir, token);
-    }
-
-    // Generate SBOM from temp directory
+    // Generate exactly the ecosystems that were fetched — a package.json fetched
+    // only as a companion must not turn into an npm audit of its ranges.
     const result = generateSbom({
       projectDir: tempDir,
-      ecosystem: packageFile.ecosystem,
+      ecosystems: [...new Set(packageFiles.map((file) => file.ecosystem))],
     });
 
     // Update subject name to reflect the GitHub repo

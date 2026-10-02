@@ -57,16 +57,18 @@ program
         failOnHigh: options.failOnHigh,
         lookupAdvisories: lookupOsvAdvisories,
         generateComponents: async () => {
-          if (isRemote) {
-            console.log("Analyzing repository...");
-            const repoInfo = parseGitHubUrl(options.url);
-            const sbomResult = await generateSbomFromGitHub({ repoInfo, token: githubToken });
-            return sbomResult.sbom.components;
-          } else {
-            console.log("Analyzing project...");
-            const sbomResult = generateSbom({ projectDir: resolve(options.path) });
-            return sbomResult.sbom.components;
-          }
+          console.log(isRemote ? "Analyzing repository..." : "Analyzing project...");
+          const sbomResult = isRemote
+            ? await generateSbomFromGitHub({ repoInfo: parseGitHubUrl(options.url), token: githubToken })
+            : generateSbom({ projectDir: resolve(options.path) });
+
+          // Say what was covered, so a mixed repo's Python or npm half is never silently missed.
+          const counts = sbomResult.ecosystems.map((ecosystem) =>
+            `${ecosystem} (${sbomResult.sbom.components.filter((c) => (ecosystem === "python" ? c.ecosystem === "pypi" : c.ecosystem === ecosystem)).length})`
+          );
+          console.log(`Ecosystems: ${counts.join(", ")}`);
+          for (const warning of sbomResult.warnings) console.warn(`Warning: ${warning}`);
+          return sbomResult.sbom.components;
         },
         pollKev: async () => {
           console.log("Checking for vulnerabilities...");

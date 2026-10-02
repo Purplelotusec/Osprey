@@ -290,7 +290,8 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `s
   `requirements.txt` handling follows pip's syntax: `-r` includes are followed (with cycle protection), `-c` constraint files are not (they install nothing), and hashes, `\` continuations, extras (`pkg[extra]==`), environment markers and `===` pins are understood. Ranges, wildcards (`==4.*`), direct URL references and editable installs have no exact index version, so they are skipped and reported, never guessed.
 
   Git, URL and local-path packages in any lockfile are skipped and reported as warnings, because they aren't the PyPI release a `pkg:pypi` PURL would claim. The project's own entry (an editable install of itself) is excluded silently.
-- **Remote auditing (`--url`):** reads the repository's default branch unless a `/tree/<branch>` is given. It looks for `package-lock.json`, then the Python files above in the same order, then `package.json`. It also fetches the companion files: `pyproject.toml`, `Pipfile`, `requirements-dev.lock`, and `-r` includes (only within the audited directory, at most 25 files).
+- **Mixed projects:** every ecosystem present is audited into one SBOM. A Django or Flask backend with an npm-built frontend gets both its Python and npm dependencies checked, and `cra` prints the coverage (`Ecosystems: npm (989), python (292)`). Use `cra-sbom --ecosystem npm|python` to restrict the SBOM to one.
+- **Remote auditing (`--url`):** reads the repository's default branch unless a `/tree/<branch>` is given. It fetches the preferred manifest of each ecosystem: `package-lock.json` for npm, and the Python files above in the same order. `package.json` is used only when no other manifest exists, since it holds ranges and in a Python repo is often just front-end tooling. It also fetches the companion files: `pyproject.toml`, `Pipfile`, `requirements-dev.lock`, and `-r` includes (only within the audited directory, at most 25 files).
 - **Signing:** Ed25519 over DSSE pre-authentication encoding. Changing one byte of a signed SBOM, or verifying with the wrong key, fails verification.
 - **KEV polling:** Zod schema validation plus local caching, so a network failure can't silently report "no vulnerabilities".
 
@@ -298,7 +299,6 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `s
 
 - **Lockfile coverage:** no `yarn.lock`, `pnpm-lock.yaml`, `go.sum`, or `Cargo.lock` support yet. Conda environments (`conda-lock.yml`, `pixi.lock`) aren't read, since they lock conda packages rather than PyPI releases. `pyproject.toml` alone (without a lockfile) isn't used for versions, since it only declares ranges.
 - **Remote named PEP 751 lockfiles:** `--url` only finds `pylock.toml`, because named variants (`pylock.dev.toml`) can't be discovered without listing the directory. Local audits read all of them.
-- **One ecosystem per project:** a directory with both `package-lock.json` and a Python manifest is audited as npm only.
 - **No CPE matching:** KEV's free-text fields are the only matching signal. An NVD/OSV-backed provider with real affected-version ranges would sharpen the `low` tier.
 - **PyPI version ranges:** OSV range evaluation uses semver ordering, so PEP 440 versions that are not semver (e.g. `2.0`, `4.2rc1`) are only reported `affected` on an exact listed-version hit and otherwise `unknown`.
 - **Local-key signing:** Ed25519 with local keys, not Sigstore keyless or a transparency log. The envelope shape stays the same if you upgrade to cosign later.

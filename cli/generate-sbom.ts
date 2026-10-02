@@ -14,7 +14,7 @@ program
   .description("Generate, sign, and store a CycloneDX SBOM for a project")
   .option("-p, --path <dir>", "project directory", ".")
   .option("-o, --output <file>", "write the SBOM JSON to this file")
-  .option("--ecosystem <type>", "force npm or python instead of auto-detecting")
+  .option("--ecosystem <type>", "only include npm or python (default: every ecosystem detected)")
   .option("--sign", "sign the SBOM with an Ed25519 key", false)
   .option("--key <path>", "path to the Ed25519 private key PEM", join(homedir(), ".osprey", "sbom-signing-key.pem"))
   .option("--key-id <id>", "identifier embedded in the signature envelope", "default")
