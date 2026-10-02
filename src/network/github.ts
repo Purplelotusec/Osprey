@@ -91,11 +91,19 @@ export async function fetchOptionalGitHubFile(
 /**
  * Manifests looked for in a remote repository, most precise first: lockfiles
  * pin every package at its resolved version; package.json only has ranges.
+ * Python order mirrors local detection (src/sbom/generate/python.ts). Named
+ * PEP 751 variants (pylock.<name>.toml) can't be discovered without listing
+ * the directory, so only pylock.toml is looked for.
  */
 const REMOTE_MANIFESTS: Array<{ fileName: string; ecosystem: "npm" | "python" }> = [
   { fileName: "package-lock.json", ecosystem: "npm" },
   { fileName: "uv.lock", ecosystem: "python" },
   { fileName: "poetry.lock", ecosystem: "python" },
+  { fileName: "pdm.lock", ecosystem: "python" },
+  { fileName: "pylock.toml", ecosystem: "python" },
+  { fileName: "Pipfile.lock", ecosystem: "python" },
+  { fileName: "requirements.lock", ecosystem: "python" },
+  { fileName: "requirements-dev.lock", ecosystem: "python" },
   { fileName: "requirements.txt", ecosystem: "python" },
   { fileName: "package.json", ecosystem: "npm" },
 ];
@@ -117,7 +125,7 @@ export async function detectAndFetchPackageFile(
 
   throw new Error(
     `No supported package file found in ${owner}/${repo}${path ? `/${path}` : ""}. ` +
-    `Supported files: package-lock.json, package.json (npm), uv.lock, poetry.lock, requirements.txt (Python)`
+    `Supported files: ${REMOTE_MANIFESTS.map((manifest) => manifest.fileName).join(", ")}`
   );
 }
 

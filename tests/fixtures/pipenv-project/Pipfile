@@ -1,0 +1,12 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+requests = "*"
+example-pipenv-app = {path = ".", editable = true}
+vendored-lib = {git = "https://github.com/example/vendored-lib.git", ref = "abc123"}
+
+[dev-packages]
+pytest = "*"

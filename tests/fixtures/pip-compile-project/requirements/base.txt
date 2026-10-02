@@ -1,0 +1,3 @@
+# shared base pins; includes requirements.txt back to prove cycles are safe
+-r ../requirements.txt
+Certifi==2024.8.30

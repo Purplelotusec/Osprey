@@ -1,9 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { buildPurl } from "../purl.js";
 import { normalizePypiName, parseTomlFile, readPyproject } from "./pyproject.js";
-import type { NormalizedComponent } from "../types.js";
+import { PypiComponentSet } from "./pypi-components.js";
 import type { PythonLockfileResult } from "./python.js";
 
 const dependencyList = z.array(z.object({ name: z.string() }).passthrough());
@@ -54,9 +53,10 @@ export function generateFromUvLock(projectDir: string): PythonLockfileResult {
     for (const dep of lists.flat()) direct.add(normalizePypiName(dep.name));
   }
 
-  const components: NormalizedComponent[] = [];
+  // uv may lock several versions of one package for different environment
+  // markers; each is a real install and is kept (the set drops exact repeats).
+  const set = new PypiComponentSet();
   const skipped: string[] = [];
-  const seen = new Set<string>();
 
   for (const pkg of packages) {
     const name = normalizePypiName(pkg.name);
@@ -67,26 +67,14 @@ export function generateFromUvLock(projectDir: string): PythonLockfileResult {
       skipped.push(`${pkg.name} (${pkg.version ? `${kind} source` : "no resolved version"})`);
       continue;
     }
-
-    // uv may lock several versions of one package for different environment markers.
-    const key = `${name}@${pkg.version}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    components.push({
-      purl: buildPurl({ type: "pypi", name, version: pkg.version }),
-      ecosystem: "pypi",
-      name,
-      version: pkg.version,
-      isDirect: projects.length > 0 ? direct.has(name) : undefined,
-    });
+    set.add(pkg.name, pkg.version, projects.length > 0 ? direct.has(name) : undefined);
   }
 
   const pyproject = readPyproject(projectDir);
   return {
     subjectName: projects[0]?.name ?? pyproject?.name,
     subjectVersion: projects[0]?.version ?? pyproject?.version,
-    components,
+    components: set.components,
     skipped,
   };
 }

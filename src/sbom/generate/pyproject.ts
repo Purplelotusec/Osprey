@@ -37,13 +37,17 @@ const pyprojectSchema = z.object({
       "dev-dependencies": poetryDependencyTable.optional(),
       group: z.record(z.object({ dependencies: poetryDependencyTable.optional() }).passthrough()).optional(),
     }).passthrough().optional(),
+    // Pre-PEP 735 dev dependency tables, still common in PDM and older uv projects.
+    pdm: z.object({ "dev-dependencies": z.record(stringList).optional() }).passthrough().optional(),
+    uv: z.object({ "dev-dependencies": stringList.optional() }).passthrough().optional(),
+    rye: z.object({ "dev-dependencies": stringList.optional() }).passthrough().optional(),
   }).passthrough().optional(),
 }).passthrough();
 
 /**
  * Reads the project's own name, version and declared dependencies from
- * pyproject.toml — covering PEP 621 ([project]), PEP 735 ([dependency-groups])
- * and Poetry's [tool.poetry] tables. Used only to label the SBOM subject and to
+ * pyproject.toml — covering PEP 621 ([project]), PEP 735 ([dependency-groups]),
+ * Poetry's [tool.poetry] tables and the PDM/uv/Rye legacy dev-dependency tables. Used only to label the SBOM subject and to
  * mark components as direct; resolved versions always come from the lockfile.
  * Returns undefined when there is no pyproject.toml.
  */
@@ -60,6 +64,9 @@ export function readPyproject(projectDir: string): PyprojectInfo | undefined {
     ...(project?.dependencies ?? []),
     ...Object.values(project?.["optional-dependencies"] ?? {}).flat(),
     ...Object.values(dependencyGroups ?? {}).flat(),
+    ...Object.values(tool?.pdm?.["dev-dependencies"] ?? {}).flat(),
+    ...(tool?.uv?.["dev-dependencies"] ?? []),
+    ...(tool?.rye?.["dev-dependencies"] ?? []),
   ];
   const poetryNames = [
     ...Object.keys(poetry?.dependencies ?? {}),

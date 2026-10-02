@@ -1,0 +1,41 @@
+{
+    "_meta": {
+        "hash": {"sha256": "00"},
+        "pipfile-spec": 6,
+        "requires": {"python_version": "3.12"},
+        "sources": [{"name": "pypi", "url": "https://pypi.org/simple", "verify_ssl": true}]
+    },
+    "default": {
+        "certifi": {
+            "hashes": ["sha256:00"],
+            "index": "pypi",
+            "markers": "python_version >= '3.6'",
+            "version": "==2024.8.30"
+        },
+        "example-pipenv-app": {
+            "editable": true,
+            "path": "."
+        },
+        "requests": {
+            "hashes": ["sha256:00"],
+            "index": "pypi",
+            "version": "==2.32.3"
+        },
+        "vendored-lib": {
+            "git": "https://github.com/example/vendored-lib.git",
+            "ref": "abc123"
+        }
+    },
+    "develop": {
+        "pytest": {
+            "hashes": ["sha256:00"],
+            "index": "pypi",
+            "version": "==8.3.3"
+        },
+        "requests": {
+            "hashes": ["sha256:00"],
+            "index": "pypi",
+            "version": "==2.32.3"
+        }
+    }
+}

@@ -1,0 +1,12 @@
+lock-version = "1.0"
+created-by = "uv"
+
+[[packages]]
+name = "attrs"
+version = "25.1.0"
+index = "https://pypi.org/simple/"
+
+[[packages]]
+name = "mkdocs"
+version = "1.6.1"
+index = "https://pypi.org/simple/"

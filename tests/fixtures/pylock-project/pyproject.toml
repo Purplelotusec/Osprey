@@ -1,0 +1,7 @@
+[project]
+name = "example-pylock-app"
+version = "0.9.0"
+dependencies = ["attrs"]
+
+[dependency-groups]
+dev = ["pyyaml"]

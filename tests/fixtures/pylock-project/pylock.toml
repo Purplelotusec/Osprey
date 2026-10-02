@@ -1,0 +1,32 @@
+lock-version = "1.0"
+environments = []
+extras = []
+dependency-groups = ["dev"]
+default-groups = ["default"]
+created-by = "pip"
+
+[[packages]]
+name = "attrs"
+version = "25.1.0"
+index = "https://pypi.org/simple/"
+wheels = [
+    {name = "attrs-25.1.0-py3-none-any.whl", url = "https://files.pythonhosted.org/attrs-25.1.0-py3-none-any.whl", hashes = {sha256 = "00"}},
+]
+
+[[packages]]
+name = "example-pylock-app"
+directory = {path = ".", editable = true}
+
+[[packages]]
+name = "PyYAML"
+version = "6.0.2"
+marker = "'dev' in dependency_groups"
+index = "https://pypi.org/simple/"
+sdist = {name = "pyyaml-6.0.2.tar.gz", url = "https://files.pythonhosted.org/pyyaml-6.0.2.tar.gz", hashes = {sha256 = "00"}}
+
+[[packages]]
+name = "tool-from-git"
+[packages.vcs]
+type = "git"
+url = "https://github.com/example/tool.git"
+commit-id = "abc123"

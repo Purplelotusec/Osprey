@@ -1,9 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { buildPurl } from "../purl.js";
-import { normalizePypiName, parseTomlFile, readPyproject } from "./pyproject.js";
-import type { NormalizedComponent } from "../types.js";
+import { parseTomlFile, readPyproject } from "./pyproject.js";
+import { PypiComponentSet, directFromPyproject, isProjectItself } from "./pypi-components.js";
 import type { PythonLockfileResult } from "./python.js";
 
 const poetryLockSchema = z.object({
@@ -33,35 +32,22 @@ export function generateFromPoetryLock(projectDir: string): PythonLockfileResult
   if (!parsed.success) throw new Error(`${lockPath} is not a valid Poetry lockfile: ${parsed.error.issues[0]?.message}`);
 
   const pyproject = readPyproject(projectDir);
-  const components: NormalizedComponent[] = [];
+  const set = new PypiComponentSet();
   const skipped: string[] = [];
-  const seen = new Set<string>();
 
   for (const pkg of parsed.data.package) {
     const sourceType = pkg.source?.type;
     if (sourceType && !INDEX_SOURCES.has(sourceType)) {
-      skipped.push(`${pkg.name} (${sourceType} source)`);
+      if (!isProjectItself(pkg.name, pyproject)) skipped.push(`${pkg.name} (${sourceType} source)`);
       continue;
     }
-
-    const name = normalizePypiName(pkg.name);
-    const key = `${name}@${pkg.version}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    components.push({
-      purl: buildPurl({ type: "pypi", name, version: pkg.version }),
-      ecosystem: "pypi",
-      name,
-      version: pkg.version,
-      isDirect: pyproject ? pyproject.directDependencies.has(name) : undefined,
-    });
+    set.add(pkg.name, pkg.version, directFromPyproject(pyproject, pkg.name));
   }
 
   return {
     subjectName: pyproject?.name,
     subjectVersion: pyproject?.version,
-    components,
+    components: set.components,
     skipped,
   };
 }

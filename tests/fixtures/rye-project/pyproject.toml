@@ -1,0 +1,8 @@
+[project]
+name = "example-rye-app"
+version = "0.1.0"
+dependencies = ["click>=8"]
+
+[tool.rye]
+managed = true
+dev-dependencies = ["pytest>=8"]

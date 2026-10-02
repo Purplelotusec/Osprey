@@ -273,19 +273,31 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `s
 ### What works today
 
 - **npm:** full `package-lock.json` (v1, v2, v3) parsing, including direct vs. transitive dependencies, scoped packages, and deduplication.
-- **Python:** detected in this order of preference:
-  - `uv.lock`: every registry package at its resolved version, transitive dependencies included. Direct dependencies come from the workspace member's dependencies, extras and dev groups.
-  - `poetry.lock`: every PyPI or alternate-index package. Direct dependencies come from `pyproject.toml` (`[project]`, `[dependency-groups]`, `[tool.poetry]`) when present.
-  - `requirements.txt` with exact pins (`pkg==1.2.3`). Ranges and VCS lines are skipped and reported, never guessed.
+- **Python:** every major lockfile format, detected in this order of preference:
 
-  Git, URL and local-path packages in a lockfile are skipped and reported as warnings, because they aren't the PyPI release a `pkg:pypi` PURL would claim.
-- **Remote auditing (`--url`):** reads the repository's default branch unless a `/tree/<branch>` is given, and looks for `package-lock.json`, `uv.lock`, `poetry.lock`, `requirements.txt`, then `package.json`.
+  | File | Tool | Direct dependencies from |
+  |---|---|---|
+  | `uv.lock` | uv | the workspace member's dependencies, extras and dev groups |
+  | `poetry.lock` | Poetry | `pyproject.toml` |
+  | `pdm.lock` | PDM | `pyproject.toml` |
+  | `pylock.toml`, `pylock.<name>.toml` | PEP 751 standard (pip, uv, PDM, Pipenv); named variants are merged | `pyproject.toml` |
+  | `Pipfile.lock` | Pipenv (`default` and `develop`) | `Pipfile` |
+  | `requirements.lock`, `requirements-dev.lock` | Rye (read together) | `pyproject.toml` |
+  | `requirements.txt` | pip, pip-compile, `uv export`, `pip freeze` | `pyproject.toml`, otherwise every pin |
+
+  Every package is recorded at its exact resolved version, transitive dependencies included. `pyproject.toml` covers `[project]`, `[dependency-groups]`, `[tool.poetry]`, and the PDM, uv and Rye dev-dependency tables. If no source of direct dependencies is available, directness is left unknown rather than guessed.
+
+  `requirements.txt` handling follows pip's syntax: `-r` includes are followed (with cycle protection), `-c` constraint files are not (they install nothing), and hashes, `\` continuations, extras (`pkg[extra]==`), environment markers and `===` pins are understood. Ranges, wildcards (`==4.*`), direct URL references and editable installs have no exact index version, so they are skipped and reported, never guessed.
+
+  Git, URL and local-path packages in any lockfile are skipped and reported as warnings, because they aren't the PyPI release a `pkg:pypi` PURL would claim. The project's own entry (an editable install of itself) is excluded silently.
+- **Remote auditing (`--url`):** reads the repository's default branch unless a `/tree/<branch>` is given. It looks for `package-lock.json`, then the Python files above in the same order, then `package.json`. It also fetches the companion files: `pyproject.toml`, `Pipfile`, `requirements-dev.lock`, and `-r` includes (only within the audited directory, at most 25 files).
 - **Signing:** Ed25519 over DSSE pre-authentication encoding. Changing one byte of a signed SBOM, or verifying with the wrong key, fails verification.
 - **KEV polling:** Zod schema validation plus local caching, so a network failure can't silently report "no vulnerabilities".
 
 ### Known limitations
 
-- **Lockfile coverage:** no `yarn.lock`, `pnpm-lock.yaml`, `Pipfile.lock`, `pdm.lock`, `go.sum`, or `Cargo.lock` support yet. `pyproject.toml` alone (without a lockfile) isn't used for versions, since it only declares ranges.
+- **Lockfile coverage:** no `yarn.lock`, `pnpm-lock.yaml`, `go.sum`, or `Cargo.lock` support yet. Conda environments (`conda-lock.yml`, `pixi.lock`) aren't read, since they lock conda packages rather than PyPI releases. `pyproject.toml` alone (without a lockfile) isn't used for versions, since it only declares ranges.
+- **Remote named PEP 751 lockfiles:** `--url` only finds `pylock.toml`, because named variants (`pylock.dev.toml`) can't be discovered without listing the directory. Local audits read all of them.
 - **One ecosystem per project:** a directory with both `package-lock.json` and a Python manifest is audited as npm only.
 - **No CPE matching:** KEV's free-text fields are the only matching signal. An NVD/OSV-backed provider with real affected-version ranges would sharpen the `low` tier.
 - **PyPI version ranges:** OSV range evaluation uses semver ordering, so PEP 440 versions that are not semver (e.g. `2.0`, `4.2rc1`) are only reported `affected` on an exact listed-version hit and otherwise `unknown`.
