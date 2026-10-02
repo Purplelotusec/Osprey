@@ -1,6 +1,6 @@
 import type { NormalizedComponent } from "../sbom/types.js";
 import type { KevEntry } from "../vulnerability/types.js";
-import type { OsvAdvisory } from "../vulnerability/osv.js";
+import { osvPackage, osvPackageKey, type OsvAdvisory } from "../vulnerability/osv.js";
 
 export type MatchConfidence = "high" | "low";
 
@@ -39,10 +39,10 @@ export function crossCheckWithAdvisories(
 
   // For each component, check if its OSV vulnerabilities appear in KEV
   for (const component of components) {
-    const packageName = getPackageName(component);
-    if (!packageName) continue;
+    const pkg = osvPackage(component);
+    if (!pkg) continue;
 
-    const advisories = advisoriesByPackage.get(packageName) ?? [];
+    const advisories = advisoriesByPackage.get(osvPackageKey(pkg)) ?? [];
 
     for (const advisory of advisories) {
       // Check if this advisory's CVE is in CISA KEV
@@ -82,11 +82,4 @@ function extractCveIds(advisory: OsvAdvisory): string[] {
   }
 
   return cves;
-}
-
-function getPackageName(component: NormalizedComponent): string | undefined {
-  if (component.ecosystem === "npm") {
-    return component.namespace ? `${component.namespace}/${component.name}` : component.name;
-  }
-  return undefined;
 }

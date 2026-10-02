@@ -214,7 +214,7 @@ CISA KEV entries use free-text vendor and product names, not machine-precise CPE
 
 ### Version status
 
-For npm packages, OSV advisories determine whether your installed version is affected:
+For npm and Python (PyPI) packages, OSV advisories determine whether your installed version is affected:
 
 | `versionStatus` | Meaning |
 |---|---|
@@ -281,7 +281,7 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, an
 
 - **Lockfile coverage:** no `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `go.sum`, or `Cargo.lock` support yet.
 - **No CPE matching:** KEV's free-text fields are the only matching signal. An NVD/OSV-backed provider with real affected-version ranges would sharpen the `low` tier.
-- **Version intelligence is npm-only:** Python packages don't yet get OSV version evaluation.
+- **PyPI version ranges:** OSV range evaluation uses semver ordering, so PEP 440 versions that are not semver (e.g. `2.0`, `4.2rc1`) are only reported `affected` on an exact listed-version hit and otherwise `unknown`.
 - **Local-key signing:** Ed25519 with local keys, not Sigstore keyless or a transparency log. The envelope shape stays the same if you upgrade to cosign later.
 - **KEV feed verification:** the poller was verified end-to-end against a synthetic snapshot matching the real response shape. Confirm behavior against the live CISA feed in your own environment.
 

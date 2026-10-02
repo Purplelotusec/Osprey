@@ -1,4 +1,5 @@
 import type { SecurityFinding, SboimResult } from "../vulnerability/types.js";
+import { osvPackage } from "../vulnerability/osv.js";
 import { colors, symbols, colorize, bold, dim, section, formatTable } from "./formatter.js";
 
 export interface AuditReportOptions {
@@ -126,7 +127,8 @@ function printFindings(findings: SecurityFinding[], options: FindingsPrintOption
       if (finding.versionStatus === "affected" && finding.patchedVersion) {
         console.log(colorize(`   ${symbols.warning} REMEDIATION:`, "yellow"));
         console.log(`   ${colorize(`Current: ${finding.currentVersion ?? "unknown"}`, "red")} → ${colorize(`Upgrade to: ${finding.patchedVersion}+`, "green")}`);
-        console.log(`   ${dim(`Run: npm install ${finding.component.name}@${finding.patchedVersion}`)}`);
+        const installCommand = upgradeCommand(finding, finding.patchedVersion);
+        if (installCommand) console.log(`   ${dim(`Run: ${installCommand}`)}`);
       } else if (finding.versionStatus === "affected") {
         console.log(colorize(`   ${symbols.warning} RECOMMENDED ACTION:`, "yellow"));
         console.log(`   ${dim("Update to the latest patched version immediately.")}`);
@@ -145,6 +147,13 @@ function printFindings(findings: SecurityFinding[], options: FindingsPrintOption
     }
   }
   console.log();
+}
+
+function upgradeCommand(finding: SecurityFinding, version: string): string | undefined {
+  const pkg = osvPackage(finding.component);
+  if (pkg?.ecosystem === "npm") return `npm install ${pkg.name}@${version}`;
+  if (pkg?.ecosystem === "PyPI") return `pip install ${pkg.name}==${version}`;
+  return undefined;
 }
 
 function getVersionStatusText(finding: SecurityFinding): string {
