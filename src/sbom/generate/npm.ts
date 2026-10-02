@@ -31,6 +31,9 @@ export interface NpmGenerationResult {
  * package.json + package-lock.json. Does not run `npm install` — reads
  * only what's already resolved on disk, so it's safe to run in CI without
  * network access or a fresh install step.
+ *
+ * If package-lock.json is not found, falls back to package.json dependencies
+ * (less precise - uses version ranges instead of exact versions).
  */
 export function generateFromNpmProject(projectDir: string): NpmGenerationResult {
   const pkgJsonPath = join(projectDir, "package.json");
@@ -41,16 +44,21 @@ export function generateFromNpmProject(projectDir: string): NpmGenerationResult 
   }
   const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
 
-  if (!existsSync(lockPath)) {
-    throw new Error(
-      `No package-lock.json found at ${lockPath} — run "npm install" first so versions are resolved, or use a different generator for yarn/pnpm.`
-    );
+  // Try to use lock file first (precise versions)
+  if (existsSync(lockPath)) {
+    const lock: PackageLockV2V3 = JSON.parse(readFileSync(lockPath, "utf-8"));
+    const components: NormalizedComponent[] =
+      lock.lockfileVersion >= 2 && lock.packages ? parseV2V3(lock) : parseV1(lock);
+
+    return {
+      subjectName: pkgJson.name ?? "unknown-npm-project",
+      subjectVersion: pkgJson.version,
+      components,
+    };
   }
-  const lock: PackageLockV2V3 = JSON.parse(readFileSync(lockPath, "utf-8"));
 
-  const components: NormalizedComponent[] =
-    lock.lockfileVersion >= 2 && lock.packages ? parseV2V3(lock) : parseV1(lock);
-
+  // Fallback to package.json (version ranges - less precise)
+  const components = parsePackageJson(pkgJson);
   return {
     subjectName: pkgJson.name ?? "unknown-npm-project",
     subjectVersion: pkgJson.version,
@@ -126,5 +134,40 @@ function parseV1(lock: PackageLockV2V3): NormalizedComponent[] {
   }
 
   walk(lock.dependencies, true);
+  return components;
+}
+
+/**
+ * Parse dependencies directly from package.json (when no lock file exists).
+ * Note: This uses version ranges (^1.0.0) instead of exact versions (1.0.5),
+ * so version status checks may be less accurate.
+ */
+function parsePackageJson(pkgJson: any): NormalizedComponent[] {
+  const components: NormalizedComponent[] = [];
+  const deps = {
+    ...pkgJson.dependencies,
+    ...pkgJson.devDependencies,
+  };
+
+  for (const [fullName, versionRange] of Object.entries(deps) as [string, string][]) {
+    const isScoped = fullName.startsWith("@");
+    const [namespace, name] = isScoped
+      ? [fullName.split("/")[0], fullName.split("/")[1]]
+      : [undefined, fullName];
+
+    // Clean version range: ^1.0.0 → 1.0.0, ~2.3.4 → 2.3.4
+    // Note: This is imprecise! We're taking the base version from the range
+    const version = versionRange.replace(/^[\^~>=<]/, "").split(" ")[0];
+
+    components.push({
+      purl: buildPurl({ type: "npm", namespace, name, version }),
+      ecosystem: "npm",
+      namespace,
+      name,
+      version,
+      isDirect: true,
+    });
+  }
+
   return components;
 }

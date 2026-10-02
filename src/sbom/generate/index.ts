@@ -5,7 +5,7 @@ import { generateFromNpmProject } from "./npm.js";
 import { generateFromRequirementsTxt } from "./python.js";
 import type { NormalizedComponent, NormalizedSbom } from "../types.js";
 
-const TOOL_NAME = "cra-guard-sbom-gen";
+const TOOL_NAME = "osprey-sbom-gen";
 const TOOL_VERSION = "0.1.0";
 
 export interface GenerateOptions {
