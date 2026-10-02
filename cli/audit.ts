@@ -22,7 +22,7 @@ program
   .option("-p, --path <dir>", "local project directory to audit", ".")
   .option("-u, --url <github-url>", "GitHub repository URL to audit (e.g., owner/repo or https://github.com/owner/repo)")
   .option("--cache <file>", "KEV cache file path", join(homedir(), ".osprey", "kev-cache.json"))
-  .option("--offline", "use only cached KEV data (no network request)", false)
+  .option("--offline", "use only cached KEV data (OSV advisories are still fetched online)", false)
   .option("--output <file>", "write detailed JSON result to file")
   .option("--verbose", "show detailed output with additional information", false)
   .option("--fail-on-high", "exit with error code if high-confidence vulnerabilities found", false)

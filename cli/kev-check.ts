@@ -22,7 +22,7 @@ program
   .option("--sbom <file>", "use an existing CycloneDX JSON SBOM instead of generating one")
   .option("--pipeline-result <file>", "reuse Generate/Sign/Store stage state from cra-sbom")
   .option("--cache <file>", "KEV cache file, used as fallback on fetch failure", join(homedir(), ".osprey", "kev-cache.json"))
-  .option("--offline", "use only the cached KEV snapshot, no network call", false)
+  .option("--offline", "use only the cached KEV snapshot (OSV advisories are still fetched online)", false)
   .option("--webhook <url>", "Slack-compatible webhook URL to alert on matches")
   .option("--result <file>", "write a structured machine-readable SBOIM result JSON file")
   .option("--fail-on-high", "exit non-zero if any high-confidence match is found (for CI gating)", false)

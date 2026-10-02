@@ -146,7 +146,7 @@ cra-kev --path . --webhook https://hooks.slack.com/services/... --fail-on-high
 | `-p, --path <dir>` | Local project directory to audit | `.` |
 | `-u, --url <github-url>` | GitHub repository to audit | – |
 | `--cache <file>` | KEV cache file path | `~/.osprey/kev-cache.json` |
-| `--offline` | Use only cached KEV data (no network) | `false` |
+| `--offline` | Use only cached KEV data. OSV advisories are still fetched online, so the audit fails if OSV is unreachable | `false` |
 | `--output <file>` | Write detailed JSON result to file | – |
 | `--verbose` | Show detailed output | `false` |
 | `--fail-on-high` | Exit with error on high-confidence matches | `false` |
@@ -294,6 +294,7 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `s
 - **Remote auditing (`--url`):** reads the repository's default branch unless a `/tree/<branch>` is given. It fetches the preferred manifest of each ecosystem: `package-lock.json` for npm, and the Python files above in the same order. `package.json` is used only when no other manifest exists, since it holds ranges and in a Python repo is often just front-end tooling. It also fetches the companion files: `pyproject.toml`, `Pipfile`, `requirements-dev.lock`, and `-r` includes (only within the audited directory, at most 25 files).
 - **Signing:** Ed25519 over DSSE pre-authentication encoding. Changing one byte of a signed SBOM, or verifying with the wrong key, fails verification.
 - **KEV polling:** Zod schema validation plus local caching, so a network failure can't silently report "no vulnerabilities".
+- **OSV lookups:** a failed advisory lookup fails the audit ("Audit incomplete", exit code 1) instead of passing with nothing checked. OSV is the only link from a package to its CVEs.
 
 ### Known limitations
 
