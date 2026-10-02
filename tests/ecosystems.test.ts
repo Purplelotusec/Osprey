@@ -71,6 +71,28 @@ describe("cross-check across ecosystems", () => {
     expect(matches[0].kevEntry.cveId).toBe(CVE);
   });
 
+  it("reports a CVE once per component when several advisories alias it", async () => {
+    const ghsa = advisory("PyPI", "Django");
+    const pysec: OsvAdvisory = { id: "PYSEC-2026-0001", aliases: [CVE], affected: ghsa.affected };
+    const advisories = new Map([[osvPackageKey({ ecosystem: "PyPI", name: "django" }), [ghsa, pysec]]]);
+
+    const matches = crossCheckWithAdvisories([djangoComponent], [kevEntry()], advisories);
+    expect(matches).toHaveLength(1);
+
+    // The single finding still cites every advisory that names the CVE.
+    const result = await runKevCheck({
+      subjectName: "python-project",
+      failOnHigh: false,
+      generateComponents: () => [djangoComponent],
+      pollKev: async () => ({ count: 1, entries: [kevEntry()], fetchedAt: "2026-10-02T00:00:00Z" }),
+      lookupAdvisories: async () => advisories,
+      crossCheck: crossCheckWithAdvisories,
+      sendAlert: async () => {},
+    });
+    expect(result.matches).toHaveLength(1);
+    expect(result.matches[0].advisoryIds).toContain(ghsa.id);
+  });
+
   it("does not apply an npm package's advisories to a same-named PyPI package", () => {
     const advisories = new Map([[osvPackageKey({ ecosystem: "npm", name: "django" }), [advisory("npm", "django")]]]);
     expect(crossCheckWithAdvisories([djangoComponent], [kevEntry()], advisories)).toHaveLength(0);

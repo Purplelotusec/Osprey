@@ -43,14 +43,19 @@ export function crossCheckWithAdvisories(
     if (!pkg) continue;
 
     const advisories = advisoriesByPackage.get(osvPackageKey(pkg)) ?? [];
+    // Several advisories (e.g. GHSA-… and PYSEC-…) often alias the same CVE;
+    // report each (component, CVE) once. Enrichment still cites every advisory.
+    const matchedCves = new Set<string>();
 
     for (const advisory of advisories) {
       // Check if this advisory's CVE is in CISA KEV
       const cveIds = extractCveIds(advisory);
 
       for (const cveId of cveIds) {
-        const kevEntry = kevCveMap.get(cveId.toUpperCase());
-        if (kevEntry) {
+        const normalizedCve = cveId.toUpperCase();
+        const kevEntry = kevCveMap.get(normalizedCve);
+        if (kevEntry && !matchedCves.has(normalizedCve)) {
+          matchedCves.add(normalizedCve);
           // This CVE is actively exploited!
           matches.push({
             component,
