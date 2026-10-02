@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import semver from "semver";
 import { buildPurl } from "../purl.js";
 import type { NormalizedComponent } from "../types.js";
 
@@ -24,6 +25,7 @@ export interface NpmGenerationResult {
   subjectName: string;
   subjectVersion?: string;
   components: NormalizedComponent[];
+  warnings: string[];
 }
 
 /**
@@ -54,15 +56,27 @@ export function generateFromNpmProject(projectDir: string): NpmGenerationResult 
       subjectName: pkgJson.name ?? "unknown-npm-project",
       subjectVersion: pkgJson.version,
       components,
+      warnings: [],
     };
   }
 
   // Fallback to package.json (version ranges - less precise)
-  const components = parsePackageJson(pkgJson);
+  const { components, skipped } = parsePackageJson(pkgJson);
+  const warnings = [
+    "No package-lock.json: npm versions are the lowest each package.json range allows, not what is installed. Commit a lockfile for exact results.",
+  ];
+  if (skipped.length > 0) {
+    warnings.push(
+      `Skipped ${skipped.length} package.json dependenc${skipped.length === 1 ? "y" : "ies"} with no resolvable version: ` +
+        skipped.slice(0, 5).join(", ") +
+        (skipped.length > 5 ? ", ..." : "")
+    );
+  }
   return {
     subjectName: pkgJson.name ?? "unknown-npm-project",
     subjectVersion: pkgJson.version,
     components,
+    warnings,
   };
 }
 
@@ -138,26 +152,30 @@ function parseV1(lock: PackageLockV2V3): NormalizedComponent[] {
 }
 
 /**
- * Parse dependencies directly from package.json (when no lock file exists).
- * Note: This uses version ranges (^1.0.0) instead of exact versions (1.0.5),
- * so version status checks may be less accurate.
+ * Reads dependencies straight from package.json when there is no lockfile.
+ * A range has no single installed version, so each component is recorded at
+ * the lowest version its range allows (semver.minVersion: "^1.2.3" → 1.2.3,
+ * ">=1.0 <2" → 1.0.0). That is a lower bound, not what is installed. Specs
+ * with no meaningful lower bound — "*", "latest", git/file/workspace/alias
+ * specs — are skipped and reported rather than guessed.
  */
-function parsePackageJson(pkgJson: any): NormalizedComponent[] {
+export function parsePackageJson(pkgJson: {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+}): { components: NormalizedComponent[]; skipped: string[] } {
   const components: NormalizedComponent[] = [];
-  const deps = {
-    ...pkgJson.dependencies,
-    ...pkgJson.devDependencies,
-  };
+  const skipped: string[] = [];
+  const deps = { ...pkgJson.devDependencies, ...pkgJson.dependencies };
 
-  for (const [fullName, versionRange] of Object.entries(deps) as [string, string][]) {
+  for (const [fullName, spec] of Object.entries(deps)) {
     const isScoped = fullName.startsWith("@");
-    const [namespace, name] = isScoped
-      ? [fullName.split("/")[0], fullName.split("/")[1]]
-      : [undefined, fullName];
+    const [namespace, name] = isScoped ? [fullName.split("/")[0], fullName.split("/")[1]] : [undefined, fullName];
 
-    // Clean version range: ^1.0.0 → 1.0.0, ~2.3.4 → 2.3.4
-    // Note: This is imprecise! We're taking the base version from the range
-    const version = versionRange.replace(/^[\^~>=<]/, "").split(" ")[0];
+    const version = lowestVersion(spec);
+    if (!version) {
+      skipped.push(`${fullName}@${spec}`);
+      continue;
+    }
 
     components.push({
       purl: buildPurl({ type: "npm", namespace, name, version }),
@@ -169,5 +187,12 @@ function parsePackageJson(pkgJson: any): NormalizedComponent[] {
     });
   }
 
-  return components;
+  return { components, skipped };
+}
+
+function lowestVersion(spec: string): string | undefined {
+  if (typeof spec !== "string" || semver.validRange(spec) === null) return undefined; // git+, file:, workspace:, npm: aliases, tags
+  const min = semver.minVersion(spec);
+  // "*", "x", ">=0" bottom out at 0.0.0: no information about what is installed.
+  return min && min.version !== "0.0.0" ? min.version : undefined;
 }

@@ -85,7 +85,7 @@ describe("cross-check across ecosystems", () => {
       failOnHigh: false,
       generateComponents: () => [djangoComponent],
       pollKev: async () => ({ count: 1, entries: [kevEntry()], fetchedAt: "2026-10-02T00:00:00Z" }),
-      lookupAdvisories: async () => advisories,
+      lookupAdvisories: async () => ({ advisories, warnings: [] }),
       crossCheck: crossCheckWithAdvisories,
       sendAlert: async () => {},
     });
@@ -118,7 +118,7 @@ describe("version status for PyPI findings", () => {
       failOnHigh: true,
       generateComponents: () => [djangoComponent],
       pollKev: async () => ({ count: 1, entries: [kevEntry()], fetchedAt: "2026-10-02T00:00:00Z" }),
-      lookupAdvisories: async () => new Map([[osvPackageKey({ ecosystem: "PyPI", name: "django" }), [pypiAdvisory]]]),
+      lookupAdvisories: async () => ({ advisories: new Map([[osvPackageKey({ ecosystem: "PyPI", name: "django" }), [pypiAdvisory]]]), warnings: [] }),
       crossCheck: crossCheckWithAdvisories,
       sendAlert: async () => {},
     });

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { homedir } from "node:os";
@@ -9,7 +9,7 @@ import { generateSbom } from "../src/sbom/generate/index.js";
 import { generateSbomFromGitHub } from "../src/sbom/generate/remote.js";
 import { parseGitHubUrl } from "../src/network/github.js";
 import { runKevCheck } from "../src/vulnerability/check.js";
-import { lookupOsvAdvisories } from "../src/vulnerability/osv.js";
+import { createOsvAdvisoryFetcher } from "../src/vulnerability/osv-cache.js";
 import { printAuditReport, printAuditSummary } from "../src/output/audit-report.js";
 import type { NormalizedComponent } from "../src/sbom/types.js";
 import type { SboimResult } from "../src/vulnerability/types.js";
@@ -22,11 +22,14 @@ program
   .option("-p, --path <dir>", "local project directory to audit", ".")
   .option("-u, --url <github-url>", "GitHub repository URL to audit (e.g., owner/repo or https://github.com/owner/repo)")
   .option("--cache <file>", "KEV cache file path", join(homedir(), ".osprey", "kev-cache.json"))
-  .option("--offline", "use only cached KEV data (OSV advisories are still fetched online)", false)
+  .option("--osv-cache <file>", "OSV advisory cache file path", join(homedir(), ".osprey", "osv-cache.json"))
+  .option("--offline", "use only cached KEV and OSV data (no vulnerability-data requests; fails if anything isn't cached)", false)
   .option("--output <file>", "write detailed JSON result to file")
   .option("--verbose", "show detailed output with additional information", false)
   .option("--fail-on-high", "exit with error code if high-confidence vulnerabilities found", false)
-  .option("--show-low", "include low-confidence matches in output (default: true)", true)
+  // Deprecated no-op: every match is now an exact CVE match, so there is no
+  // low-confidence tier to show. Still accepted so existing scripts keep working.
+  .addOption(new Option("--show-low").hideHelp())
   .option("--github-token <token>", "GitHub personal access token for private repos (or set GITHUB_TOKEN env var)")
   .option("--summary", "show only summary output (default: full report)", false)
   .action(async (options) => {
@@ -55,7 +58,7 @@ program
         subjectName,
         webhookUrl: undefined,
         failOnHigh: options.failOnHigh,
-        lookupAdvisories: lookupOsvAdvisories,
+        lookupAdvisories: createOsvAdvisoryFetcher({ cachePath: resolve(options.osvCache), offline: options.offline }),
         generateComponents: async () => {
           console.log(isRemote ? "Analyzing repository..." : "Analyzing project...");
           const sbomResult = isRemote
@@ -100,10 +103,7 @@ program
       if (options.summary) {
         printAuditSummary(result);
       } else {
-        printAuditReport(result, {
-          verbose: options.verbose,
-          showLowConfidence: options.showLow,
-        });
+        printAuditReport(result, { verbose: options.verbose });
       }
 
       // Print timing

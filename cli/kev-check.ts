@@ -8,7 +8,7 @@ import { crossCheckWithAdvisories } from "../src/correlation/matcher.js";
 import { sendCrossCheckAlert, printCrossCheckResults } from "../src/alerting/webhook.js";
 import { generateSbom } from "../src/sbom/generate/index.js";
 import { runKevCheck } from "../src/vulnerability/check.js";
-import { lookupOsvAdvisories } from "../src/vulnerability/osv.js";
+import { createOsvAdvisoryFetcher } from "../src/vulnerability/osv-cache.js";
 import { z } from "zod";
 import type { NormalizedComponent } from "../src/sbom/types.js";
 import type { SboimResult } from "../src/vulnerability/types.js";
@@ -22,7 +22,8 @@ program
   .option("--sbom <file>", "use an existing CycloneDX JSON SBOM instead of generating one")
   .option("--pipeline-result <file>", "reuse Generate/Sign/Store stage state from cra-sbom")
   .option("--cache <file>", "KEV cache file, used as fallback on fetch failure", join(homedir(), ".osprey", "kev-cache.json"))
-  .option("--offline", "use only the cached KEV snapshot (OSV advisories are still fetched online)", false)
+  .option("--osv-cache <file>", "OSV advisory cache, used as fallback on lookup failure", join(homedir(), ".osprey", "osv-cache.json"))
+  .option("--offline", "use only the cached KEV and OSV data (no vulnerability-data requests; fails if anything isn't cached)", false)
   .option("--webhook <url>", "Slack-compatible webhook URL to alert on matches")
   .option("--result <file>", "write a structured machine-readable SBOIM result JSON file")
   .option("--fail-on-high", "exit non-zero if any high-confidence match is found (for CI gating)", false)
@@ -35,7 +36,7 @@ program
       webhookUrl: options.webhook,
       failOnHigh: options.failOnHigh,
       pipeline,
-      lookupAdvisories: lookupOsvAdvisories,
+      lookupAdvisories: createOsvAdvisoryFetcher({ cachePath: resolve(options.osvCache), offline: options.offline }),
       generateComponents: () => {
         const components = options.sbom
           ? loadComponentsFromSbomFile(resolve(options.sbom))

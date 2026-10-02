@@ -61,8 +61,58 @@ describe("lookupOsvAdvisories", () => {
     });
 
     const result = await lookupOsvAdvisories([{ ecosystem: "pypi", name: "django", version: "3.2.0", purl: "pkg:pypi/django@3.2.0" }]);
-    const advisories = result.get(osvPackageKey({ ecosystem: "PyPI", name: "django" })) ?? [];
+    const advisories = result.advisories.get(osvPackageKey({ ecosystem: "PyPI", name: "django" })) ?? [];
 
     expect(advisories.map((advisory) => advisory.id).sort()).toEqual(ids);
+  });
+});
+
+describe("OSV batch responses (review findings 1 and 2)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const django = { ecosystem: "pypi", name: "django", version: "3.2.0", purl: "pkg:pypi/django@3.2.0" };
+  const lodash = { ecosystem: "npm", name: "lodash", version: "4.17.20", purl: "pkg:npm/lodash@4.17.20" };
+
+  function stubBatch(respond: (queries: Array<{ package: { name: string }; page_token?: string }>) => unknown): void {
+    vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/querybatch")) return Response.json(respond(JSON.parse(String(init?.body)).queries));
+      return Response.json({ id: decodeURIComponent(String(input).split("/").pop()!) });
+    });
+  }
+
+  it("rejects a response without results instead of reading it as 'no vulnerabilities'", async () => {
+    stubBatch(() => ({}));
+    await expect(lookupOsvAdvisories([django])).rejects.toThrow(/OSV query response did not match the expected schema: results/);
+  });
+
+  it("rejects a response with fewer results than queries", async () => {
+    stubBatch(() => ({ results: [{ vulns: [{ id: "GHSA-1" }] }] }));
+    await expect(lookupOsvAdvisories([django, lodash])).rejects.toThrow(/OSV returned 1 results for 2 queries/);
+  });
+
+  it("accepts an empty per-package result: that package genuinely has no advisories", async () => {
+    stubBatch((queries) => ({ results: queries.map(() => ({})) }));
+    const { advisories } = await lookupOsvAdvisories([django]);
+    expect(advisories.get(osvPackageKey({ ecosystem: "PyPI", name: "django" }))).toEqual([]);
+  });
+
+  it("follows next_page_token until every page of advisories is collected", async () => {
+    const seenTokens: Array<string | undefined> = [];
+    stubBatch((queries) => ({
+      results: queries.map((q) => {
+        seenTokens.push(q.page_token);
+        if (!q.page_token) return { vulns: [{ id: "GHSA-page1" }], next_page_token: "p2" };
+        if (q.page_token === "p2") return { vulns: [{ id: "GHSA-page2" }], next_page_token: "p3" };
+        return { vulns: [{ id: "GHSA-page3" }] };
+      }),
+    }));
+    const { advisories } = await lookupOsvAdvisories([django]);
+    expect(advisories.get(osvPackageKey({ ecosystem: "PyPI", name: "django" }))?.map((a) => a.id)).toEqual(["GHSA-page1", "GHSA-page2", "GHSA-page3"]);
+    expect(seenTokens).toEqual([undefined, "p2", "p3"]);
+  });
+
+  it("gives up on a server that never stops paginating", async () => {
+    let page = 0;
+    stubBatch((queries) => ({ results: queries.map(() => ({ vulns: [], next_page_token: `t${++page}` })) }));
+    await expect(lookupOsvAdvisories([django])).rejects.toThrow(/more than 50 pages of advisories for django \(PyPI\)/);
   });
 });

@@ -26,7 +26,7 @@ function options(overrides: Partial<KevCheckRunOptions> = {}): KevCheckRunOption
     failOnHigh: false,
     generateComponents: () => [component],
     pollKev: async () => snapshot,
-    lookupAdvisories: async () => new Map(),
+    lookupAdvisories: async () => ({ advisories: new Map(), warnings: [] }),
     crossCheck: crossCheckWithAdvisories,
     sendAlert: async () => {},
     ...overrides,

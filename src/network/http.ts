@@ -8,6 +8,14 @@ export interface BoundedFetchOptions {
   retryDelay?: number;
 }
 
+/** A non-2xx response, with its status so callers can tell "not found" from "failed". */
+export class HttpError extends Error {
+  constructor(readonly status: number, statusText: string) {
+    super(`HTTP ${status} ${statusText}`);
+    this.name = "HttpError";
+  }
+}
+
 export async function fetchText(
   url: string,
   init: RequestInit = {},
@@ -20,7 +28,7 @@ export async function fetchText(
 
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    if (!response.ok) throw new HttpError(response.status, response.statusText);
 
     const contentLength = response.headers.get("content-length");
     if (contentLength && Number(contentLength) > maxBytes) {
@@ -72,7 +80,7 @@ export async function fetchJson(
       lastError = error instanceof Error ? error : new Error(String(error));
 
       // Don't retry on 4xx errors (client errors)
-      if (lastError.message.match(/HTTP 4\d\d/)) {
+      if (lastError instanceof HttpError && lastError.status >= 400 && lastError.status < 500) {
         throw lastError;
       }
 

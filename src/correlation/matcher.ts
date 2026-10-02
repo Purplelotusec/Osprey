@@ -2,13 +2,19 @@ import type { NormalizedComponent } from "../sbom/types.js";
 import type { KevEntry } from "../vulnerability/types.js";
 import { osvPackage, osvPackageKey, type OsvAdvisory } from "../vulnerability/osv.js";
 
-export type MatchConfidence = "high" | "low";
+/**
+ * Every match is an exact CVE link from OSV, so confidence is always "high".
+ * The field (and SboimResult.lowConfidenceMatchCount, always 0) stays in the
+ * schemaVersion 1.0 output for consumers written against the old name-based
+ * matcher, which also produced "low" matches.
+ */
+export type MatchConfidence = "high";
 
 export interface CrossCheckMatch {
   component: NormalizedComponent;
   kevEntry: KevEntry;
   confidence: MatchConfidence;
-  matchedOn: "cve_from_osv" | "cve_direct";
+  matchedOn: "cve_from_osv";
 }
 
 /**

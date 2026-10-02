@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { generateSbom, type GenerateResult } from "./index.js";
 import { findRequirementIncludes } from "./requirements.js";
 import type { GitHubRepoInfo } from "../../network/github.js";
-import { detectAndFetchPackageFiles, fetchOptionalGitHubFile, fetchPackageJson } from "../../network/github.js";
+import { detectAndFetchPackageFiles, fetchOptionalGitHubFile } from "../../network/github.js";
 
 export interface RemoteGenerationOptions {
   repoInfo: GitHubRepoInfo;
@@ -13,7 +13,7 @@ export interface RemoteGenerationOptions {
 
 export async function generateSbomFromGitHub(options: RemoteGenerationOptions): Promise<GenerateResult> {
   const { repoInfo, token } = options;
-  const { owner, repo, branch, path } = repoInfo;
+  const { owner, repo, path } = repoInfo;
 
   // One preferred manifest per ecosystem present (npm and/or Python).
   const packageFiles = await detectAndFetchPackageFiles(repoInfo, { token });
@@ -24,14 +24,11 @@ export async function generateSbomFromGitHub(options: RemoteGenerationOptions): 
     for (const packageFile of packageFiles) {
       writeFileSync(join(tempDir, packageFile.fileName), packageFile.content, "utf-8");
 
-      // npm lockfiles take the project name/version from package.json.
+      // npm lockfiles are read together with package.json (project name/version).
+      // A missing one surfaces from the npm generator; a failed fetch throws here.
       if (packageFile.fileName === "package-lock.json") {
-        try {
-          const pkgJson = await fetchPackageJson(owner, repo, { branch, path, token });
-          writeFileSync(join(tempDir, "package.json"), JSON.stringify(pkgJson, null, 2), "utf-8");
-        } catch {
-          // package.json is optional for our purposes
-        }
+        const pkgJson = await fetchOptionalGitHubFile(repoInfo, "package.json", { token });
+        if (pkgJson !== undefined) writeFileSync(join(tempDir, "package.json"), pkgJson, "utf-8");
       }
 
       if (packageFile.ecosystem === "python") {

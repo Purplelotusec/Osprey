@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { generateFromNpmProject } from "./npm.js";
-import { detectPythonManifest, generateFromPythonProject, PYTHON_MANIFESTS } from "./python.js";
+import { detectPythonManifest, generateFromPythonProject, PYTHON_MANIFESTS, pythonManifestFile } from "./python.js";
 import type { NormalizedComponent, NormalizedSbom } from "../types.js";
 
 const TOOL_NAME = "osprey-sbom-gen";
@@ -34,7 +34,7 @@ interface EcosystemResult {
 }
 
 const GENERATORS: Record<Ecosystem, (projectDir: string) => EcosystemResult> = {
-  npm: (dir) => ({ ...generateFromNpmProject(dir), warnings: [] }),
+  npm: generateFromNpmProject,
   python: generateFromPythonProject,
 };
 
@@ -73,6 +73,20 @@ export function generateSbom(opts: GenerateOptions): GenerateResult {
   };
 
   return { sbom, warnings: results.flatMap((result) => result.warnings), ecosystems };
+}
+
+/**
+ * The dependency file each ecosystem's components come from, keyed by PURL
+ * type ("npm", "pypi"), as paths relative to projectDir. Lets reports attach a
+ * finding to the file a developer would edit.
+ */
+export function detectManifestFiles(projectDir: string): Partial<Record<"npm" | "pypi", string>> {
+  const files: Partial<Record<"npm" | "pypi", string>> = {};
+  const npmFile = ["package-lock.json", "package.json"].find((file) => existsSync(join(projectDir, file)));
+  if (npmFile) files.npm = npmFile;
+  const pythonFile = pythonManifestFile(projectDir);
+  if (pythonFile) files.pypi = pythonFile;
+  return files;
 }
 
 /** Every ecosystem with a supported manifest in the directory, in ECOSYSTEMS order. */

@@ -1,4 +1,4 @@
-import { fetchText } from "./http.js";
+import { fetchText, HttpError } from "./http.js";
 
 export interface GitHubRepoInfo {
   owner: string;
@@ -74,17 +74,21 @@ export async function fetchGitHubFile(
   return fetchText(url, { headers }, {});
 }
 
-/** Fetches a file if it exists, or returns undefined (any fetch failure counts as absent). */
+/** Fetches a file if it exists: undefined on 404, throws on any other failure. */
 export async function fetchOptionalGitHubFile(
   repoInfo: GitHubRepoInfo,
   fileName: string,
   options?: { token?: string }
 ): Promise<string | undefined> {
   const { owner, repo, branch, path } = repoInfo;
+  const filePath = path ? `${path}/${fileName}` : fileName;
   try {
-    return await fetchGitHubFile(owner, repo, path ? `${path}/${fileName}` : fileName, { branch, token: options?.token });
-  } catch {
-    return undefined;
+    return await fetchGitHubFile(owner, repo, filePath, { branch, token: options?.token });
+  } catch (err) {
+    // Only "not found" means absent. A rate limit, bad token or outage must fail the
+    // audit: treating it as absent could silently drop a whole ecosystem from it.
+    if (err instanceof HttpError && err.status === 404) return undefined;
+    throw new Error(`Could not fetch ${filePath} from ${owner}/${repo}: ${(err as Error).message}`);
   }
 }
 
@@ -143,7 +147,7 @@ export async function detectAndFetchPackageFiles(
 
   const packageJson = await fetchOptionalGitHubFile(repoInfo, "package.json", options);
   if (packageJson !== undefined) {
-    console.warn("⚠ Using package.json (no lock file found). Version ranges may be imprecise.");
+    // The npm generator reports the imprecision (and any skipped specs) as SBOM warnings.
     return [{ ecosystem: "npm", fileName: "package.json", content: packageJson }];
   }
 
@@ -152,27 +156,4 @@ export async function detectAndFetchPackageFiles(
     `No supported package file found in ${owner}/${repo}${path ? `/${path}` : ""}. ` +
     `Supported files: ${supported.join(", ")}`
   );
-}
-
-export interface GitHubPackageJson {
-  name?: string;
-  version?: string;
-  dependencies?: Record<string, string>;
-  devDependencies?: Record<string, string>;
-}
-
-export async function fetchPackageJson(
-  owner: string,
-  repo: string,
-  options?: { branch?: string; path?: string; token?: string }
-): Promise<GitHubPackageJson> {
-  const basePath = options?.path ?? "";
-  const filePath = basePath ? `${basePath}/package.json` : "package.json";
-
-  try {
-    const content = await fetchGitHubFile(owner, repo, filePath, { branch: options?.branch, token: options?.token });
-    return JSON.parse(content);
-  } catch (error) {
-    throw new Error(`Failed to fetch package.json: ${error instanceof Error ? error.message : String(error)}`);
-  }
 }

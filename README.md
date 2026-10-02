@@ -35,7 +35,7 @@ Osprey is a CLI (`cra`) that builds a Software Bill of Materials (SBOM) from you
 | | |
 |---|---|
 |  **KEV detection** | Cross-checks components against CISA's KEV catalog |
-|  **Confidence tiers** | `high` (PURL-backed exact match) vs `low` (name/vendor match only) |
+|  **Exact CVE matching** | Links each package to its CVEs through OSV advisories. No name guessing, so no "WordPress Core" false positives |
 |  **Version intelligence** | Uses [OSV](https://osv.dev) to decide whether your *installed* version is actually affected |
 |  **Remote auditing** | Audit a GitHub repo without cloning it |
 | **SBOM signing** | Ed25519 signatures in a DSSE envelope, with tamper detection |
@@ -106,7 +106,7 @@ cra --url owner/private-repo
 cra --path . --fail-on-high --output results.json
 ```
 
-Exits non-zero if any **high-confidence** exploited vulnerability is found.
+Exits non-zero if any dependency's **installed version is affected** by a known exploited vulnerability. A package that has a KEV CVE but is already patched does not fail the build.
 
 ### Generate and sign an SBOM
 
@@ -118,7 +118,7 @@ cra-sbom --path . --output sbom.json --sign --generate-key
 
 ```bash
 cra-kev --sbom sbom.json --cache ~/.osprey/kev-cache.json
-cra-kev --sbom sbom.json --offline            # cached KEV data only
+cra-kev --sbom sbom.json --offline            # cached KEV and OSV data only, no network
 ```
 
 ### Alert via webhook
@@ -146,11 +146,11 @@ cra-kev --path . --webhook https://hooks.slack.com/services/... --fail-on-high
 | `-p, --path <dir>` | Local project directory to audit | `.` |
 | `-u, --url <github-url>` | GitHub repository to audit | – |
 | `--cache <file>` | KEV cache file path | `~/.osprey/kev-cache.json` |
-| `--offline` | Use only cached KEV data. OSV advisories are still fetched online, so the audit fails if OSV is unreachable | `false` |
+| `--osv-cache <file>` | OSV advisory cache file path | `~/.osprey/osv-cache.json` |
+| `--offline` | Use only cached KEV and OSV data, with no vulnerability-data requests. Fails if any package isn't cached | `false` |
 | `--output <file>` | Write detailed JSON result to file | – |
 | `--verbose` | Show detailed output | `false` |
-| `--fail-on-high` | Exit with error on high-confidence matches | `false` |
-| `--show-low` | Include low-confidence matches in output | `true` |
+| `--fail-on-high` | Exit with error if an installed version is affected by a KEV CVE | `false` |
 | `--github-token <token>` | GitHub token for private repos | `$GITHUB_TOKEN` |
 | `--summary` | Show only the summary | `false` |
 
@@ -170,30 +170,31 @@ cra-kev --path . --webhook https://hooks.slack.com/services/... --fail-on-high
 |---|---|
 | ✓ **Green** | No actively exploited vulnerabilities detected |
 | ✗ **Red** | Actively exploited vulnerable components found |
-| ⚠ **Yellow** | Warnings or low-confidence matches |
+| ⚠ **Yellow** | Warnings, or findings whose version status is unknown |
 
 **Clean run**
 
 ```
-Auditing: /path/to/project
+Auditing: vacanza/holidays
 
-Generating SBOM from local project...
-Found 245 components
-
-Polling CISA Known Exploited Vulnerabilities (KEV)...
-Loaded 1,234 KEV entries (as of 2026-09-18)
+Analyzing repository...
+Ecosystems: python (105)
+Checking for vulnerabilities...
 
 ✓ No active exploitable vulnerabilities detected
-All components are clear of known exploited vulnerabilities.
 ```
 
 **Findings**
 
 ```
-✗ Vulnerable components detected
+Vulnerability Audit
+───────────────────
+1281 packages checked
+✗ 1 vulnerable package(s)
+✓ 1 safe (patched)
 
-  ✗ 2 HIGH confidence match(es)
-  ⚠ 1 LOW confidence match(es)
+Known Exploited Vulnerabilities
+───────────────────────────────
 
 1. CVE-2024-12345
    Component: vulnerable-package@1.2.3
@@ -201,16 +202,14 @@ All components are clear of known exploited vulnerabilities.
    Vulnerability: Remote Code Execution in vulnerable-package
    Version Status: AFFECTED (1.2.3 is vulnerable)
    Required Action: Apply mitigations per vendor instructions or discontinue use
+   ⚠ REMEDIATION:
+   Current: 1.2.3 → Upgrade to: 1.2.4+
+   Run: npm install vulnerable-package@1.2.4
 ```
 
-### Confidence tiers
+### How matching works
 
-CISA KEV entries use free-text vendor and product names, not machine-precise CPE ranges, so Osprey grades every match:
-
-- **`high`**: PURL-backed exact product match.
-- **`low`**: name/vendor match only.
-
-> ⚠️ **Do not trigger automated regulatory or incident clocks on `low` confidence matches.** See `src/correlation/matcher.ts` for the reasoning.
+Osprey never matches on names. KEV's free-text vendor and product fields produced false positives that way (for example `@aws-sdk/core` matching "WordPress Core"). Instead, each dependency is looked up in [OSV](https://osv.dev), the CVE IDs from its advisories are collected, and only the CVEs that appear in KEV are reported. Every finding is therefore an exact CVE link for that exact package.
 
 ### Version status
 
@@ -244,7 +243,44 @@ The result (`schemaVersion: "1.0"`) includes:
 
 Version-enriched findings add `identityConfidence`, `versionStatus`, `exploitationStatus`, and `advisoryIds`. Signing and storage stages currently report `skipped` until secure CI credentials and key management are configured. Consumers that only read `status` remain compatible.
 
-The GitHub Actions reporter (`cra-report`) turns this result into a job summary, escaped annotations, and SARIF output.
+### GitHub Actions reporting (`cra-report`)
+
+`cra-report` turns a result file into three outputs:
+- a Markdown job summary, appended to `$GITHUB_STEP_SUMMARY` automatically
+- workflow annotations
+- SARIF 2.1.0 for GitHub code scanning
+
+```bash
+cra-report --result result.json --sarif osprey.sarif --annotations
+```
+
+| Option | Description |
+|---|---|
+| `--result <file>` | Result JSON from `cra --output` or `cra-kev --result` (required, validated before rendering) |
+| `--summary <file>` | Also write the Markdown summary to a file |
+| `--sarif <file>` | Write SARIF for code scanning |
+| `--annotations` | Print workflow annotations |
+| `--project <dir>` | Audited directory (default `.`), used to attach SARIF findings to its dependency files |
+
+How each finding is reported depends on whether the installed version is affected:
+
+| Version status | SARIF level | Annotation |
+|---|---|---|
+| `affected` | `error` | error |
+| `unknown` | `warning` | warning |
+| `not_affected` (patched) | `note` | none |
+
+Each SARIF finding is attached to the dependency file its package came from (`package-lock.json`, `uv.lock`, …), and each CVE becomes a rule carrying the KEV description and CISA's required action. The summary reports FAILED whenever an installed version is affected, even if `--fail-on-high` wasn't set, and never presents an incomplete audit as clean. Values from lockfiles and KEV are escaped so they can't inject Markdown, HTML or workflow commands.
+
+```yaml
+- run: npx cra --path . --output osprey-result.json --fail-on-high
+- if: always()
+  run: npx cra-report --result osprey-result.json --sarif osprey.sarif --annotations
+- if: always()
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: osprey.sarif
+```
 
 
 ---
@@ -256,7 +292,7 @@ npm install     # also builds
 npm test        # runs the test suite
 ```
 
-The tests cover npm/Python SBOM generation, signing round-trips, tamper detection, wrong-key rejection, confidence tiering, npm/OSV version evaluation, and reporting.
+The tests cover npm/Python SBOM generation, signing round-trips, tamper detection, wrong-key rejection, CVE-based matching, npm/PyPI OSV version evaluation, and reporting.
 
 To remove global commands installed with `npm link`:
 
@@ -293,14 +329,14 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `s
 - **Mixed projects:** every ecosystem present is audited into one SBOM. A Django or Flask backend with an npm-built frontend gets both its Python and npm dependencies checked, and `cra` prints the coverage (`Ecosystems: npm (989), python (292)`). Use `cra-sbom --ecosystem npm|python` to restrict the SBOM to one.
 - **Remote auditing (`--url`):** reads the repository's default branch unless a `/tree/<branch>` is given. It fetches the preferred manifest of each ecosystem: `package-lock.json` for npm, and the Python files above in the same order. `package.json` is used only when no other manifest exists, since it holds ranges and in a Python repo is often just front-end tooling. It also fetches the companion files: `pyproject.toml`, `Pipfile`, `requirements-dev.lock`, and `-r` includes (only within the audited directory, at most 25 files).
 - **Signing:** Ed25519 over DSSE pre-authentication encoding. Changing one byte of a signed SBOM, or verifying with the wrong key, fails verification.
-- **KEV polling:** Zod schema validation plus local caching, so a network failure can't silently report "no vulnerabilities".
-- **OSV lookups:** a failed advisory lookup fails the audit ("Audit incomplete", exit code 1) instead of passing with nothing checked. OSV is the only link from a package to its CVEs.
+- **KEV polling:** Zod schema validation plus local caching, so a network failure can't silently report "no vulnerabilities". An empty feed counts as a failure. The cache is written atomically and validated when read, so a truncated, edited or foreign cache file fails the run with a clear message instead of shrinking what gets checked.
+- **OSV lookups:** OSV is the only link from a package to its CVEs. Results are cached in `~/.osprey/osv-cache.json`, written atomically and validated the same way as the KEV cache. Online runs always fetch fresh data. If OSV is unreachable, the cache is used, with a warning, but only when it covers every package. Otherwise the audit fails ("Audit incomplete", exit code 1) rather than passing with packages unchecked. `--offline` reads only the cache, under the same rule. Whenever cached data is used, the report says how old it is.
 
 ### Known limitations
 
 - **Lockfile coverage:** no `yarn.lock`, `pnpm-lock.yaml`, `go.sum`, or `Cargo.lock` support yet. Conda environments (`conda-lock.yml`, `pixi.lock`) aren't read, since they lock conda packages rather than PyPI releases. `pyproject.toml` alone (without a lockfile) isn't used for versions, since it only declares ranges.
 - **Remote named PEP 751 lockfiles:** `--url` only finds `pylock.toml`, because named variants (`pylock.dev.toml`) can't be discovered without listing the directory. Local audits read all of them.
-- **No CPE matching:** KEV's free-text fields are the only matching signal. An NVD/OSV-backed provider with real affected-version ranges would sharpen the `low` tier.
+- **Matching depends on OSV:** a KEV CVE is found only when an OSV advisory links it to the package. KEV entries for software that isn't distributed as an npm or PyPI package (operating systems, appliances) can't match, which is expected.
 - **PyPI version ranges:** OSV range evaluation uses semver ordering, so PEP 440 versions that are not semver (e.g. `2.0`, `4.2rc1`) are only reported `affected` on an exact listed-version hit and otherwise `unknown`.
 - **Local-key signing:** Ed25519 with local keys, not Sigstore keyless or a transparency log. The envelope shape stays the same if you upgrade to cosign later.
 - **KEV feed verification:** the poller was verified end-to-end against a synthetic snapshot matching the real response shape. Confirm behavior against the live CISA feed in your own environment.

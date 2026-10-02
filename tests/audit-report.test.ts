@@ -70,6 +70,12 @@ describe("audit report for an incomplete run", () => {
     expect(output).toContain("No supported package file found");
   });
 
+  it("summary mode still shows warnings, e.g. that cached data was used", () => {
+    const output = captureOutput(() => printAuditSummary(result({ warnings: ["Offline: using cached OSV advisories from 2026-10-01"] })));
+    expect(output).toContain("No active exploitable vulnerabilities detected");
+    expect(output).toContain("Offline: using cached OSV advisories from 2026-10-01");
+  });
+
   it("still reports a genuinely clean run as clean", () => {
     expect(captureOutput(() => printAuditReport(result(), { verbose: true }))).toContain("PASSED");
     expect(captureOutput(() => printAuditSummary(result()))).toContain("No active exploitable vulnerabilities detected");

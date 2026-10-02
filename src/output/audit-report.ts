@@ -4,11 +4,10 @@ import { colors, symbols, colorize, bold, dim, section, formatTable } from "./fo
 
 export interface AuditReportOptions {
   verbose?: boolean;
-  showLowConfidence?: boolean;
 }
 
 export function printAuditReport(result: SboimResult, options: AuditReportOptions = {}): void {
-  const { verbose = false, showLowConfidence = true } = options;
+  const { verbose = false } = options;
 
   // Header
   console.log(section("Vulnerability Audit"));
@@ -40,20 +39,9 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
     console.log();
   }
 
-  // High confidence findings
-  const highConfidenceFindings = result.matches.filter((m) => m.confidence === "high");
-  if (highConfidenceFindings.length > 0) {
-    console.log(section("High Confidence Vulnerabilities"));
-    printFindings(highConfidenceFindings, { verbose, showDetails: true });
-  }
-
-  // Low confidence findings
-  if (showLowConfidence) {
-    const lowConfidenceFindings = result.matches.filter((m) => m.confidence === "low");
-    if (lowConfidenceFindings.length > 0) {
-      console.log(section("Low Confidence Matches (Requires Manual Review)"));
-      printFindings(lowConfidenceFindings, { verbose, showDetails: false });
-    }
+  if (result.matches.length > 0) {
+    console.log(section("Known Exploited Vulnerabilities"));
+    printFindings(result.matches, { verbose });
   }
 
   // Warnings
@@ -81,19 +69,28 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
 }
 
 /** A run that hit an error (failed stage) never produced a complete answer, whatever its counts say. */
-function isIncomplete(result: SboimResult): boolean {
+export function isIncomplete(result: SboimResult): boolean {
   return result.errors.length > 0 || Object.values(result.stages).some((stage) => stage.status === "failed");
 }
 
+/**
+ * The verdict shown to people (terminal report, CI job summary). An affected
+ * installed version is a FAILED audit even when the run's `status` is
+ * "passed" because --fail-on-high wasn't set — that flag only controls the exit code.
+ */
+export function overallStatus(result: SboimResult): "PASSED" | "FAILED" | "FAILED (audit incomplete)" {
+  if (isIncomplete(result)) return "FAILED (audit incomplete)";
+  if (result.status === "failed" || result.affectedCount > 0) return "FAILED";
+  return "PASSED";
+}
+
 function statusLabel(result: SboimResult): string {
-  if (isIncomplete(result)) return colorize("FAILED (audit incomplete)", "red");
-  if (result.status === "failed" || result.affectedCount > 0) return colorize("FAILED", "red");
-  return colorize("PASSED", "green");
+  const status = overallStatus(result);
+  return colorize(status, status === "PASSED" ? "green" : "red");
 }
 
 interface FindingsPrintOptions {
   verbose: boolean;
-  showDetails: boolean;
 }
 
 function printFindings(findings: SecurityFinding[], options: FindingsPrintOptions): void {
@@ -116,42 +113,40 @@ function printFindings(findings: SecurityFinding[], options: FindingsPrintOption
     console.log(`   Version Status: ${versionStatusText}`);
 
     // KEV details
-    if (options.showDetails) {
-      console.log(`   Product: ${finding.kevEntry.product} (${finding.kevEntry.vendorProject})`);
-      console.log(`   Description: ${finding.kevEntry.shortDescription}`);
+    console.log(`   Product: ${finding.kevEntry.product} (${finding.kevEntry.vendorProject})`);
+    console.log(`   Description: ${finding.kevEntry.shortDescription}`);
 
-      if (finding.kevEntry.requiredAction) {
-        console.log(`   Required Action: ${colorize(finding.kevEntry.requiredAction, "yellow")}`);
-      }
+    if (finding.kevEntry.requiredAction) {
+      console.log(`   Required Action: ${colorize(finding.kevEntry.requiredAction, "yellow")}`);
+    }
 
-      if (finding.kevEntry.dueDate) {
-        console.log(`   Due Date: ${finding.kevEntry.dueDate}`);
-      }
+    if (finding.kevEntry.dueDate) {
+      console.log(`   Due Date: ${finding.kevEntry.dueDate}`);
+    }
 
-      if (finding.kevEntry.knownRansomwareUse === "Known") {
-        console.log(`   ${colorize("⚠ Known Ransomware Use", "red")}`);
-      }
+    if (finding.kevEntry.knownRansomwareUse === "Known") {
+      console.log(`   ${colorize("⚠ Known Ransomware Use", "red")}`);
+    }
 
-      // Advisory information
-      if (finding.advisoryIds.length > 0) {
-        console.log(`   Advisories: ${finding.advisoryIds.join(", ")}`);
-      }
+    // Advisory information
+    if (finding.advisoryIds.length > 0) {
+      console.log(`   Advisories: ${finding.advisoryIds.join(", ")}`);
+    }
 
-      // Remediation - show patched version if available
-      console.log();
-      if (finding.versionStatus === "affected" && finding.patchedVersion) {
-        console.log(colorize(`   ${symbols.warning} REMEDIATION:`, "yellow"));
-        console.log(`   ${colorize(`Current: ${finding.currentVersion ?? "unknown"}`, "red")} → ${colorize(`Upgrade to: ${finding.patchedVersion}+`, "green")}`);
-        const installCommand = upgradeCommand(finding, finding.patchedVersion);
-        if (installCommand) console.log(`   ${dim(`Run: ${installCommand}`)}`);
-      } else if (finding.versionStatus === "affected") {
-        console.log(colorize(`   ${symbols.warning} RECOMMENDED ACTION:`, "yellow"));
-        console.log(`   ${dim("Update to the latest patched version immediately.")}`);
-        console.log(`   ${dim(`Check security advisories for ${finding.component.name}`)}`);
-      } else if (finding.versionStatus === "not_affected") {
-        console.log(colorize(`   ${symbols.success} SAFE:`, "green"));
-        console.log(`   ${dim("Your current version is not affected by this vulnerability.")}`);
-      }
+    // Remediation - show patched version if available
+    console.log();
+    if (finding.versionStatus === "affected" && finding.patchedVersion) {
+      console.log(colorize(`   ${symbols.warning} REMEDIATION:`, "yellow"));
+      console.log(`   ${colorize(`Current: ${finding.currentVersion ?? "unknown"}`, "red")} → ${colorize(`Upgrade to: ${finding.patchedVersion}+`, "green")}`);
+      const installCommand = upgradeCommand(finding, finding.patchedVersion);
+      if (installCommand) console.log(`   ${dim(`Run: ${installCommand}`)}`);
+    } else if (finding.versionStatus === "affected") {
+      console.log(colorize(`   ${symbols.warning} RECOMMENDED ACTION:`, "yellow"));
+      console.log(`   ${dim("Update to the latest patched version immediately.")}`);
+      console.log(`   ${dim(`Check security advisories for ${finding.component.name}`)}`);
+    } else if (finding.versionStatus === "not_affected") {
+      console.log(colorize(`   ${symbols.success} SAFE:`, "green"));
+      console.log(`   ${dim("Your current version is not affected by this vulnerability.")}`);
     }
 
     // Verbose mode
@@ -240,6 +235,12 @@ export function printAuditSummary(result: SboimResult): void {
       console.log();
     }
   }
+
+  // Even the short view must say when results rest on cached or partial data.
+  for (const warning of result.warnings) {
+    console.log(colorize(`${symbols.warning} ${warning}`, "yellow"));
+  }
+  if (result.warnings.length > 0) console.log();
 }
 
 function getVersionStatusBadge(status: SecurityFinding["versionStatus"]): string {

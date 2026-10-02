@@ -106,7 +106,6 @@ describe("remote (--url) mixed repositories", () => {
   });
 
   it("still falls back to package.json when it is the only manifest", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
     stubGitHub({ "package.json": '{"name":"app","dependencies":{"express":"^4.18.0"}}' });
     const files = await detectAndFetchPackageFiles(repo);
     expect(files.map((file) => file.fileName)).toEqual(["package.json"]);
@@ -115,5 +114,30 @@ describe("remote (--url) mixed repositories", () => {
   it("reports every supported file when nothing is found", async () => {
     stubGitHub({});
     await expect(detectAndFetchPackageFiles(repo)).rejects.toThrow(/package-lock\.json, uv\.lock, .*requirements\.txt, package\.json/);
+  });
+});
+
+describe("remote fetch errors are not mistaken for missing files (review finding 3)", () => {
+  function stubStatuses(statuses: Record<string, number>, files: Record<string, string>): void {
+    vi.stubGlobal("fetch", async (input: string | URL) => {
+      const path = String(input).replace(/^https:\/\/raw\.githubusercontent\.com\/owner\/repo\/HEAD\//, "");
+      if (path in statuses) return new Response("error", { status: statuses[path], statusText: "Error" });
+      return path in files ? new Response(files[path]) : new Response("Not Found", { status: 404, statusText: "Not Found" });
+    });
+  }
+
+  it.each([401, 403, 429, 500])("fails the audit when a manifest fetch returns %i, instead of dropping that ecosystem", async (status) => {
+    stubStatuses({ "package-lock.json": status }, { "requirements.txt": "django==4.2.0\n" });
+    await expect(detectAndFetchPackageFiles(repo)).rejects.toThrow(`Could not fetch package-lock.json from owner/repo: HTTP ${status}`);
+  });
+
+  it("fails when a companion file (pyproject.toml) can't be fetched", async () => {
+    stubStatuses({ "pyproject.toml": 503 }, { "uv.lock": read("uv-project", "uv.lock") });
+    await expect(generateSbomFromGitHub({ repoInfo: repo })).rejects.toThrow(/Could not fetch pyproject\.toml/);
+  });
+
+  it("still treats a 404 as 'not there'", async () => {
+    stubStatuses({}, { "requirements.txt": "django==4.2.0\n" });
+    expect((await detectAndFetchPackageFiles(repo)).map((f) => f.fileName)).toEqual(["requirements.txt"]);
   });
 });

@@ -65,6 +65,18 @@ export function detectPythonManifest(projectDir: string): PythonManifest | undef
   return PYTHON_MANIFESTS.find((manifest) => MANIFESTS[manifest].detect(projectDir));
 }
 
+/**
+ * The file a Python audit primarily reads, as it exists on disk — which can
+ * differ from the manifest kind (a named pylock.dev.toml, or Rye's
+ * requirements-dev.lock on its own). Used to point reports at a real file.
+ */
+export function pythonManifestFile(projectDir: string): string | undefined {
+  const manifest = detectPythonManifest(projectDir);
+  if (manifest === "pylock.toml") return findPylockFiles(projectDir)[0];
+  if (manifest === "requirements.lock") return RYE_LOCKS.find((file) => existsSync(join(projectDir, file)));
+  return manifest;
+}
+
 export function generateFromPythonProject(projectDir: string): PythonProjectResult {
   const manifest = detectPythonManifest(projectDir);
   if (!manifest) {
