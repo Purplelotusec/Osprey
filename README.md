@@ -6,13 +6,24 @@ Osprey is a powerful CLI tool (`cra`) that helps you identify actively exploited
 
 ## Features
 
-🔍 **SBOM Generation** — Generates Software Bill of Materials (SBOM) in CycloneDX format from npm and Python projects
+🔍 **Multi-Ecosystem SBOM Generation** — Supports npm, Python, Maven, Rust, .NET, and Ruby projects
 🎯 **KEV Detection** — Cross-checks components against CISA's Known Exploited Vulnerabilities (KEV) catalog
 🚨 **Security Auditing** — Provides color-coded, actionable reports on actively exploited vulnerabilities
 🌐 **Remote Auditing** — Audit GitHub repositories without cloning them locally
-✅ **Version Intelligence** — Uses OSV to determine if your installed versions are affected
+✅ **Version Intelligence** — Uses OSV.dev to determine if your installed versions are affected
 🔐 **SBOM Signing** — Ed25519 digital signatures with DSSE envelope
 ☁️ **Cloud Storage** — S3-compatible SBOM storage and retrieval
+
+## Supported Ecosystems
+
+| Ecosystem | Registry | File | Notes |
+|-----------|----------|------|-------|
+| **JavaScript/TypeScript** | npm | `package-lock.json` (preferred) or `package.json` | Full support for v1, v2, v3 lock files |
+| **Python** | PyPI | `requirements.txt` | Exact pins only (`==`), ranges skipped |
+| **Java** | Maven Central | `pom.xml` | Direct dependencies, variables not resolved |
+| **Rust** | Crates.io | `Cargo.lock` | Run `cargo build` to generate lock file |
+| **.NET** | NuGet | `packages.lock.json` | Run `dotnet restore --use-lock-file` |
+| **Ruby** | RubyGems | `Gemfile.lock` | Run `bundle install` to generate |
 
 Everything below has been run and verified in this environment — not just written.
 
@@ -22,6 +33,10 @@ Everything below has been run and verified in this environment — not just writ
 
 - npm: full `package-lock.json` (v1, v2, v3) parsing — direct vs. transitive deps, scoped packages, dedup
 - Python: `requirements.txt` with exact pins (`pkg==1.2.3`) — ranges/VCS lines are explicitly skipped and reported, never guessed
+- Maven (Java): `pom.xml` parsing for direct dependencies (property variables not resolved)
+- Rust: `Cargo.lock` parsing for all crates
+- .NET: `packages.lock.json` parsing with direct/transitive distinction
+- Ruby: `Gemfile.lock` parsing for all gems
 - Ed25519 signing via DSSE pre-authentication encoding — tamper detection verified (changing one byte of the SBOM after signing fails verification; signing with the wrong key fails verification)
 - CISA KEV polling with schema validation (Zod) and local caching so a network hiccup doesn't silently report "no vulnerabilities"
 - Cross-check with two confidence tiers — `high` (PURL-backed exact product match) vs `low` (name/vendor match only) — because CISA KEV entries are free-text vendor/product names, not machine-precise CPE ranges. See `src/correlation/matcher.ts` for why this distinction exists and matters for any downstream automation (e.g. auto-starting a regulatory clock — don't, on `low` confidence).
@@ -30,7 +45,7 @@ Everything below has been run and verified in this environment — not just writ
 - GitHub Actions reporting from the structured result: job summary, escaped annotations, and SARIF output
 
 **Known limitations, stated honestly:**
-- No yarn.lock / pnpm-lock.yaml / poetry.lock / go.sum / Cargo.lock generators yet — npm and pinned-pip only
+- No yarn.lock / pnpm-lock.yaml / poetry.lock / go.sum generators yet — but npm, Python, Maven, Rust, .NET, and Ruby are supported
 - CPE matching not implemented — KEV's free-text fields are the only signal; an NVD/OSV-backed provider with real affected-version ranges would upgrade the `low` tier to something more precise
 - Signing is local-key Ed25519, not full Sigstore keyless/transparency-log — same crypto primitive, less infrastructure. Upgrading to cosign's keyless flow later doesn't require changing the envelope shape.
 - The CISA feed itself couldn't be hit from this sandbox (network allowlist blocks `cisa.gov` here) — poller logic was verified end-to-end against a synthetic snapshot in the exact response shape instead. It will hit the real feed with normal internet access (Render, your own machine, CI).

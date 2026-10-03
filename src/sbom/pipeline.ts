@@ -45,9 +45,9 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     alert: { status: "skipped", reason: "Not started" },
   };
 
-  let generated: ReturnType<typeof generateSbom>;
+  let generated: Awaited<ReturnType<typeof generateSbom>>;
   try {
-    generated = generateSbom(opts);
+    generated = await generateSbom(opts);
     stages.generate = { status: "succeeded" };
   } catch (err) {
     const message = errorMessage(err);

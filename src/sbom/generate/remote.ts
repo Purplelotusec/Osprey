@@ -38,7 +38,7 @@ export async function generateSbomFromGitHub(options: RemoteGenerationOptions): 
     }
 
     // Generate SBOM from temp directory
-    const result = generateSbom({
+    const result = await generateSbom({
       projectDir: tempDir,
       ecosystem: packageFile.ecosystem,
     });

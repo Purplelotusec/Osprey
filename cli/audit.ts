@@ -68,7 +68,7 @@ program
             return sbomResult.sbom.components;
           } else {
             console.log("Analyzing project...");
-            const sbomResult = generateSbom({ projectDir: resolve(options.path) });
+            const sbomResult = await generateSbom({ projectDir: resolve(options.path) });
             capturedSourceFile = sbomResult.sbom.sourceFile;
             return sbomResult.sbom.components;
           }

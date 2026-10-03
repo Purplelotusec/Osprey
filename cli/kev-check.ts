@@ -36,10 +36,10 @@ program
       failOnHigh: options.failOnHigh,
       pipeline,
       lookupAdvisories: lookupOsvAdvisories,
-      generateComponents: () => {
+      generateComponents: async () => {
         const components = options.sbom
           ? loadComponentsFromSbomFile(resolve(options.sbom))
-          : generateSbom({ projectDir: resolve(options.path) }).sbom.components;
+          : (await generateSbom({ projectDir: resolve(options.path) })).sbom.components;
         return components;
       },
       pollKev: async () => {

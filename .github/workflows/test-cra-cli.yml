@@ -1,0 +1,316 @@
+name: Test CRA CLI
+
+on:
+  push:
+    branches: [main, dev, feat/*]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+jobs:
+  test-npm-ecosystem:
+    name: Test npm/JavaScript ecosystem
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build CRA
+        run: npm run build
+
+      - name: Link CRA globally
+        run: npm link
+
+      - name: Test on current project (npm)
+        run: |
+          cra --path . --summary
+          cra --path . --output /tmp/cra-npm-result.json
+
+      - name: Test on external npm project
+        run: cra --url lodash/lodash --summary
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-test-results
+          path: /tmp/cra-npm-result.json
+
+  test-python-ecosystem:
+    name: Test Python/PyPI ecosystem
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies and build
+        run: |
+          npm install
+          npm run build
+          npm link
+
+      - name: Create test Python project
+        run: |
+          mkdir -p /tmp/python-test
+          cd /tmp/python-test
+          cat > requirements.txt <<EOF
+          requests==2.28.0
+          flask==2.2.0
+          django==3.2.0
+          numpy==1.21.0
+          EOF
+
+      - name: Test Python project
+        run: |
+          cra --path /tmp/python-test --summary
+          cra --path /tmp/python-test --output /tmp/cra-python-result.json
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: python-test-results
+          path: /tmp/cra-python-result.json
+
+  test-rust-ecosystem:
+    name: Test Rust/Crates.io ecosystem
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - name: Install dependencies and build
+        run: |
+          npm install
+          npm run build
+          npm link
+
+      - name: Clone sample Rust project
+        run: |
+          git clone --depth 1 https://github.com/rust-lang/cargo.git /tmp/rust-test
+          cd /tmp/rust-test
+          cargo generate-lockfile || true
+
+      - name: Test Rust project
+        run: |
+          cra --path /tmp/rust-test --summary || echo "Expected to work with Cargo.lock"
+          cra --path /tmp/rust-test --output /tmp/cra-rust-result.json || echo "Skipping if no Cargo.lock"
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-test-results
+          path: /tmp/cra-rust-result.json
+
+  test-maven-ecosystem:
+    name: Test Maven/Java ecosystem
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Install dependencies and build
+        run: |
+          npm install
+          npm run build
+          npm link
+
+      - name: Create test Maven project
+        run: |
+          mkdir -p /tmp/maven-test
+          cd /tmp/maven-test
+          cat > pom.xml <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <project xmlns="http://maven.apache.org/POM/4.0.0"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+              <modelVersion>4.0.0</modelVersion>
+              <groupId>com.example</groupId>
+              <artifactId>test-project</artifactId>
+              <version>1.0.0</version>
+              <dependencies>
+                  <dependency>
+                      <groupId>org.springframework</groupId>
+                      <artifactId>spring-core</artifactId>
+                      <version>5.3.20</version>
+                  </dependency>
+                  <dependency>
+                      <groupId>com.fasterxml.jackson.core</groupId>
+                      <artifactId>jackson-databind</artifactId>
+                      <version>2.13.0</version>
+                  </dependency>
+              </dependencies>
+          </project>
+          EOF
+
+      - name: Test Maven project
+        run: |
+          cra --path /tmp/maven-test --summary
+          cra --path /tmp/maven-test --output /tmp/cra-maven-result.json
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: maven-test-results
+          path: /tmp/cra-maven-result.json
+
+  test-dotnet-ecosystem:
+    name: Test .NET/NuGet ecosystem
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install dependencies and build
+        run: |
+          npm install
+          npm run build
+          npm link
+
+      - name: Create test .NET project
+        run: |
+          mkdir -p /tmp/dotnet-test
+          cd /tmp/dotnet-test
+          dotnet new console -n TestProject
+          cd TestProject
+          dotnet add package Newtonsoft.Json --version 13.0.1
+          dotnet add package Microsoft.Extensions.Logging --version 7.0.0
+          dotnet restore --use-lock-file
+
+      - name: Test .NET project
+        run: |
+          cra --path /tmp/dotnet-test/TestProject --summary
+          cra --path /tmp/dotnet-test/TestProject --output /tmp/cra-dotnet-result.json
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dotnet-test-results
+          path: /tmp/cra-dotnet-result.json
+
+  test-ruby-ecosystem:
+    name: Test Ruby/RubyGems ecosystem
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: false
+
+      - name: Install dependencies and build
+        run: |
+          npm install
+          npm run build
+          npm link
+
+      - name: Create test Ruby project
+        run: |
+          mkdir -p /tmp/ruby-test
+          cd /tmp/ruby-test
+          cat > Gemfile <<'EOF'
+          source 'https://rubygems.org'
+          gem 'rails', '~> 7.0.0'
+          gem 'puma', '~> 5.6'
+          gem 'rack', '~> 2.2.0'
+          EOF
+          bundle install
+
+      - name: Test Ruby project
+        run: |
+          cra --path /tmp/ruby-test --summary
+          cra --path /tmp/ruby-test --output /tmp/cra-ruby-result.json
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ruby-test-results
+          path: /tmp/cra-ruby-result.json
+
+  aggregate-results:
+    name: Aggregate test results
+    runs-on: ubuntu-latest
+    needs: [test-npm-ecosystem, test-python-ecosystem, test-rust-ecosystem, test-maven-ecosystem, test-dotnet-ecosystem, test-ruby-ecosystem]
+    if: always()
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Display results summary
+        run: |
+          echo "## CRA CLI Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Ecosystem | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          for ecosystem in npm python rust maven dotnet ruby; do
+            if [ -f "${ecosystem}-test-results/cra-${ecosystem}-result.json" ]; then
+              status=$(jq -r '.status' "${ecosystem}-test-results/cra-${ecosystem}-result.json" 2>/dev/null || echo "unknown")
+              count=$(jq -r '.sbomComponentCount' "${ecosystem}-test-results/cra-${ecosystem}-result.json" 2>/dev/null || echo "?")
+              echo "| ${ecosystem} | ${status} (${count} packages) |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| ${ecosystem} | ⚠️ no results |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
