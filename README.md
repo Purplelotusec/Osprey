@@ -36,7 +36,8 @@ Osprey is a CLI (`cra`) that builds a Software Bill of Materials (SBOM) from you
 |---|---|
 |  **KEV detection** | Cross-checks components against CISA's KEV catalog |
 |  **Exact CVE matching** | Links each package to its CVEs through OSV advisories. No name guessing, so no "WordPress Core" false positives |
-|  **Version intelligence** | Uses [OSV](https://osv.dev) to decide whether your *installed* version is actually affected |
+|  **Version intelligence** | Uses [OSV](https://osv.dev) to decide whether your *installed* version is actually affected, comparing versions with each ecosystem's own rules |
+|  **Ecosystems** | npm and Python lockfiles, plus Java (Maven/Gradle) and any CycloneDX SBOM |
 |  **Remote auditing** | Audit a GitHub repo without cloning it |
 | **SBOM signing** | Ed25519 signatures in a DSSE envelope, with tamper detection |
 
@@ -120,6 +121,24 @@ cra-sbom --path . --output sbom.json --sign --generate-key
 cra-kev --sbom sbom.json --cache ~/.osprey/kev-cache.json
 cra-kev --sbom sbom.json --offline            # cached KEV and OSV data only, no network
 ```
+
+Any CycloneDX JSON SBOM works. Components in ecosystems Osprey can't check (for example Cargo or Go), or without a version, are listed in a warning as **not covered**, and the report says "M of N packages checked". If none of an SBOM's components can be checked, the audit fails instead of passing.
+
+### Audit a Java (Maven / Gradle) project
+
+Maven has no lockfile, and only the build tool can resolve the real dependency tree (parent POMs, BOMs, properties, version mediation). Let the build produce a CycloneDX SBOM, then check it:
+
+```bash
+# Maven
+mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -DoutputFormat=json
+cra-kev --sbom target/bom.json --fail-on-high
+
+# Gradle (org.cyclonedx.bom plugin; the output path depends on the plugin version and config)
+gradle cyclonedxBom
+cra-kev --sbom build/reports/bom.json --fail-on-high
+```
+
+Maven versions are compared using Maven's own ordering rules (`2.0-beta9 < 2.0`, `1-rc1 == 1-cr1`, `9.0.0.M1 == 9.0.0-M1`), so OSV's affected ranges are evaluated exactly as Maven orders versions. Findings tell you which version to set in `pom.xml` (or the BOM that manages it). Osprey never runs Maven or Gradle itself: building executes plugins and build scripts, which isn't safe for code you're auditing.
 
 ### Alert via webhook
 
@@ -213,7 +232,7 @@ Osprey never matches on names. KEV's free-text vendor and product fields produce
 
 ### Version status
 
-For npm and Python (PyPI) packages, OSV advisories determine whether your installed version is affected:
+For npm, Python (PyPI) and Maven packages, OSV advisories determine whether your installed version is affected. Each ecosystem's versions are compared with its own rules: semver for npm, PEP 440 for PyPI (`1.0rc1 < 1.0`, `1.0 == 1.0.0`), and Maven's version ordering for Maven. Advisories that cover several version windows are evaluated window by window, and the suggested fix is always the next fixed version above yours, never a downgrade.
 
 | `versionStatus` | Meaning |
 |---|---|
@@ -336,8 +355,8 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `s
 
 - **Lockfile coverage:** no `yarn.lock`, `pnpm-lock.yaml`, `go.sum`, or `Cargo.lock` support yet. Conda environments (`conda-lock.yml`, `pixi.lock`) aren't read, since they lock conda packages rather than PyPI releases. `pyproject.toml` alone (without a lockfile) isn't used for versions, since it only declares ranges.
 - **Remote named PEP 751 lockfiles:** `--url` only finds `pylock.toml`, because named variants (`pylock.dev.toml`) can't be discovered without listing the directory. Local audits read all of them.
-- **Matching depends on OSV:** a KEV CVE is found only when an OSV advisory links it to the package. KEV entries for software that isn't distributed as an npm or PyPI package (operating systems, appliances) can't match, which is expected.
-- **PyPI version ranges:** OSV range evaluation uses semver ordering, so PEP 440 versions that are not semver (e.g. `2.0`, `4.2rc1`) are only reported `affected` on an exact listed-version hit and otherwise `unknown`.
+- **Matching depends on OSV:** a KEV CVE is found only when an OSV advisory links it to the package. KEV entries for software that isn't distributed as an npm, PyPI or Maven package (operating systems, appliances) can't match, which is expected.
+- **Java dependency resolution:** Osprey reads Java dependencies from a build-generated CycloneDX SBOM, not from `pom.xml`. Libraries shaded or bundled inside other JARs don't appear in the dependency tree, so they aren't covered.
 - **Local-key signing:** Ed25519 with local keys, not Sigstore keyless or a transparency log. The envelope shape stays the same if you upgrade to cosign later.
 - **KEV feed verification:** the poller was verified end-to-end against a synthetic snapshot matching the real response shape. Confirm behavior against the live CISA feed in your own environment.
 

@@ -11,7 +11,7 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
 
   // Header
   console.log(section("Vulnerability Audit"));
-  console.log(`${result.sbomComponentCount} packages checked`);
+  console.log(packagesCheckedText(result));
   console.log();
 
   // Overall status - VERSION-AWARE
@@ -66,6 +66,14 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
     console.log(`Status: ${statusLabel(result)}`);
     console.log();
   }
+}
+
+/** "120 packages checked", or "118 of 120 packages checked" when some couldn't be (see the warnings). */
+export function packagesCheckedText(result: SboimResult): string {
+  const checked = result.checkedComponentCount ?? result.sbomComponentCount;
+  return checked === result.sbomComponentCount
+    ? `${checked} packages checked`
+    : `${checked} of ${result.sbomComponentCount} packages checked`;
 }
 
 /** A run that hit an error (failed stage) never produced a complete answer, whatever its counts say. */
@@ -138,8 +146,8 @@ function printFindings(findings: SecurityFinding[], options: FindingsPrintOption
     if (finding.versionStatus === "affected" && finding.patchedVersion) {
       console.log(colorize(`   ${symbols.warning} REMEDIATION:`, "yellow"));
       console.log(`   ${colorize(`Current: ${finding.currentVersion ?? "unknown"}`, "red")} → ${colorize(`Upgrade to: ${finding.patchedVersion}+`, "green")}`);
-      const installCommand = upgradeCommand(finding, finding.patchedVersion);
-      if (installCommand) console.log(`   ${dim(`Run: ${installCommand}`)}`);
+      const hint = upgradeHint(finding, finding.patchedVersion);
+      if (hint) console.log(`   ${dim(hint)}`);
     } else if (finding.versionStatus === "affected") {
       console.log(colorize(`   ${symbols.warning} RECOMMENDED ACTION:`, "yellow"));
       console.log(`   ${dim("Update to the latest patched version immediately.")}`);
@@ -159,10 +167,13 @@ function printFindings(findings: SecurityFinding[], options: FindingsPrintOption
   console.log();
 }
 
-function upgradeCommand(finding: SecurityFinding, version: string): string | undefined {
+/** How to apply the fix in the package's ecosystem. */
+function upgradeHint(finding: SecurityFinding, version: string): string | undefined {
   const pkg = osvPackage(finding.component);
-  if (pkg?.ecosystem === "npm") return `npm install ${pkg.name}@${version}`;
-  if (pkg?.ecosystem === "PyPI") return `pip install ${pkg.name}==${version}`;
+  if (pkg?.ecosystem === "npm") return `Run: npm install ${pkg.name}@${version}`;
+  if (pkg?.ecosystem === "PyPI") return `Run: pip install ${pkg.name}==${version}`;
+  // Maven has no install command: the version is declared in pom.xml (or a parent POM / imported BOM).
+  if (pkg?.ecosystem === "Maven") return `Update ${pkg.name} to ${version} in pom.xml (or the dependencyManagement / BOM that sets it)`;
   return undefined;
 }
 

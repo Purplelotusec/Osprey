@@ -24,6 +24,7 @@ const resultSchema = z.object({
   status: z.enum(["passed", "failed"]),
   subjectName: z.string(),
   sbomComponentCount: count,
+  checkedComponentCount: count.optional(),
   kevSnapshot: z.object({ entryCount: count, dateReleased: z.string().optional(), fetchedAt: z.string() }),
   matches: z.array(z.object({
     component: z.object({

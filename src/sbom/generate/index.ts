@@ -80,12 +80,16 @@ export function generateSbom(opts: GenerateOptions): GenerateResult {
  * type ("npm", "pypi"), as paths relative to projectDir. Lets reports attach a
  * finding to the file a developer would edit.
  */
-export function detectManifestFiles(projectDir: string): Partial<Record<"npm" | "pypi", string>> {
-  const files: Partial<Record<"npm" | "pypi", string>> = {};
-  const npmFile = ["package-lock.json", "package.json"].find((file) => existsSync(join(projectDir, file)));
+export function detectManifestFiles(projectDir: string): Partial<Record<"npm" | "pypi" | "maven", string>> {
+  const files: Partial<Record<"npm" | "pypi" | "maven", string>> = {};
+  const firstExisting = (candidates: string[]) => candidates.find((file) => existsSync(join(projectDir, file)));
+  const npmFile = firstExisting(["package-lock.json", "package.json"]);
   if (npmFile) files.npm = npmFile;
   const pythonFile = pythonManifestFile(projectDir);
   if (pythonFile) files.pypi = pythonFile;
+  // JVM components come from a build-generated SBOM; point findings at the build file.
+  const jvmFile = firstExisting(["pom.xml", "gradle.lockfile", "build.gradle.kts", "build.gradle"]);
+  if (jvmFile) files.maven = jvmFile;
   return files;
 }
 
