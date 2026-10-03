@@ -54,13 +54,43 @@ Everything below has been run and verified in this environment — not just writ
 
 ## Quick Start
 
-### Installation
+### Easy Installation (Recommended)
+
+One-line install script:
+
+```bash
+curl -fsSL https://purplelotus.space/install-osprey.sh | bash
+```
+
+Or download and run:
+
+```bash
+wget https://purplelotus.space/install-osprey.sh -O install.sh
+chmod +x install.sh
+./install.sh
+```
+
+The installer will:
+- Check prerequisites (Node.js 18+, npm, git)
+- Clone the repository to `~/.osprey`
+- Install dependencies and build
+- Create `cra` and `osprey` commands in `~/.local/bin`
+- Update your PATH if needed
+
+To uninstall:
+
+```bash
+./install.sh --uninstall
+```
+
+### Manual Installation
 
 ```bash
 git clone <your-repo-url>
 cd osprey
 npm install
 npm run build
+npm link
 ```
 
 ### Main Command: `cra` (Recommended)
