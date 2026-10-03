@@ -207,3 +207,18 @@ describe("Markdown injection (review finding 5)", () => {
     expect(summary).toContain("\\*\\*now\\*\\*");
   });
 });
+
+describe("SARIF artifact URIs (finding E)", () => {
+  const uriFor = (path: string) => toSarif(result({ matches: [finding()] }), { npm: path }).runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri;
+
+  it("percent-encodes path segments, keeping '/' as the separator", () => {
+    expect(uriFor("my app/package-lock.json")).toBe("my%20app/package-lock.json");
+    expect(uriFor("services/web#1/[legacy]/package-lock.json")).toBe("services/web%231/%5Blegacy%5D/package-lock.json");
+    expect(uriFor("frontend/ünïcode/package-lock.json")).toBe("frontend/%C3%BCn%C3%AFcode/package-lock.json");
+  });
+
+  it("leaves ordinary paths unchanged", () => {
+    expect(uriFor("package-lock.json")).toBe("package-lock.json");
+    expect(uriFor("apps/web-ui/package-lock.json")).toBe("apps/web-ui/package-lock.json");
+  });
+});

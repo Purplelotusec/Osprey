@@ -130,3 +130,39 @@ describe("components that cannot be checked (finding B)", () => {
     expect(result.warnings).toEqual([]);
   });
 });
+
+describe("SBOM generation warnings reach the result (finding A)", () => {
+  it("includes warnings returned by generateComponents, before KEV/OSV warnings", async () => {
+    const result = await runKevCheck(options({
+      generateComponents: () => ({ components: [component], warnings: ["Skipped 1 uv.lock entry: internal-lib (git source)"] }),
+      pollKev: async () => ({ ...snapshot, warnings: ["Offline: using cached KEV snapshot"] }),
+    }));
+    expect(result.warnings).toEqual(["Skipped 1 uv.lock entry: internal-lib (git source)", "Offline: using cached KEV snapshot"]);
+  });
+
+  it("keeps generation warnings even when a later stage fails", async () => {
+    const result = await runKevCheck(options({
+      generateComponents: () => ({ components: [component], warnings: ["versions are lower bounds"] }),
+      pollKev: async () => { throw new Error("KEV down"); },
+    }));
+    expect(result.status).toBe("failed");
+    expect(result.warnings).toEqual(["versions are lower bounds"]);
+  });
+
+  it("carries cra-sbom's warnings through --pipeline-result", async () => {
+    const result = await runKevCheck(options({
+      generateComponents: undefined,
+      pipeline: {
+        subjectName: "s",
+        components: [component],
+        warnings: ["Skipped 2 requirements.txt line(s)"],
+        stages: { generate: { status: "succeeded" }, sign: { status: "skipped" }, store: { status: "skipped" }, pollKev: { status: "skipped" }, crossCheck: { status: "skipped" }, alert: { status: "skipped" } },
+      },
+    }));
+    expect(result.warnings).toEqual(["Skipped 2 requirements.txt line(s)"]);
+  });
+
+  it("still accepts a plain component array", async () => {
+    expect((await runKevCheck(options({ generateComponents: () => [component] }))).warnings).toEqual([]);
+  });
+});

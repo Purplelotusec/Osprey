@@ -166,6 +166,7 @@ cra-kev --path . --webhook https://hooks.slack.com/services/... --fail-on-high
 | `-u, --url <github-url>` | GitHub repository to audit | – |
 | `--cache <file>` | KEV cache file path | `~/.osprey/kev-cache.json` |
 | `--osv-cache <file>` | OSV advisory cache file path | `~/.osprey/osv-cache.json` |
+| `--max-cache-age <days>` | Oldest cached KEV/OSV data an automatic fallback may use when the network fails (doesn't limit `--offline`) | `7` |
 | `--offline` | Use only cached KEV and OSV data, with no vulnerability-data requests. Fails if any package isn't cached | `false` |
 | `--output <file>` | Write detailed JSON result to file | – |
 | `--verbose` | Show detailed output | `false` |
@@ -345,11 +346,13 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `s
   `requirements.txt` handling follows pip's syntax: `-r` includes are followed (with cycle protection), `-c` constraint files are not (they install nothing), and hashes, `\` continuations, extras (`pkg[extra]==`), environment markers and `===` pins are understood. Ranges, wildcards (`==4.*`), direct URL references and editable installs have no exact index version, so they are skipped and reported, never guessed.
 
   Git, URL and local-path packages in any lockfile are skipped and reported as warnings, because they aren't the PyPI release a `pkg:pypi` PURL would claim. The project's own entry (an editable install of itself) is excluded silently.
-- **Mixed projects:** every ecosystem present is audited into one SBOM. A Django or Flask backend with an npm-built frontend gets both its Python and npm dependencies checked, and `cra` prints the coverage (`Ecosystems: npm (989), python (292)`). Use `cra-sbom --ecosystem npm|python` to restrict the SBOM to one.
+- **Mixed projects:** every ecosystem present is audited into one SBOM. A Django or Flask backend with an npm-built frontend gets both its Python and npm dependencies checked, and `cra` prints the coverage (`Ecosystems: npm (989), python (292)`). Use `cra-sbom --ecosystem npm|python` to restrict the SBOM to one. A `package.json` without a `package-lock.json` next to Python dependencies isn't audited (there are no exact versions), and the report says so in a warning.
 - **Remote auditing (`--url`):** reads the repository's default branch unless a `/tree/<branch>` is given. It fetches the preferred manifest of each ecosystem: `package-lock.json` for npm, and the Python files above in the same order. `package.json` is used only when no other manifest exists, since it holds ranges and in a Python repo is often just front-end tooling. It also fetches the companion files: `pyproject.toml`, `Pipfile`, `requirements-dev.lock`, and `-r` includes (only within the audited directory, at most 25 files).
 - **Signing:** Ed25519 over DSSE pre-authentication encoding. Changing one byte of a signed SBOM, or verifying with the wrong key, fails verification.
 - **KEV polling:** Zod schema validation plus local caching, so a network failure can't silently report "no vulnerabilities". An empty feed counts as a failure. The cache is written atomically and validated when read, so a truncated, edited or foreign cache file fails the run with a clear message instead of shrinking what gets checked.
 - **OSV lookups:** OSV is the only link from a package to its CVEs. Results are cached in `~/.osprey/osv-cache.json`, written atomically and validated the same way as the KEV cache. Online runs always fetch fresh data. If OSV is unreachable, the cache is used, with a warning, but only when it covers every package. Otherwise the audit fails ("Audit incomplete", exit code 1) rather than passing with packages unchecked. `--offline` reads only the cache, under the same rule. Whenever cached data is used, the report says how old it is.
+- **Stale caches:** an *automatic* fallback (network failure) only uses cached KEV or OSV data up to 7 days old. Anything older fails the audit with both causes spelled out, rather than quietly checking against outdated data. Change the limit with `--max-cache-age <days>`. Explicit `--offline` isn't limited, because choosing cached data is deliberate. When a fallback can't happen, the error gives both the network failure and the cache problem.
+- **Warnings travel with the result:** everything that limits coverage (skipped packages, version lower bounds, an unaudited `package.json`, cached data) appears in the report, the `--output` / `--result` JSON, `cra-report` summaries and SARIF runs.
 
 ### Known limitations
 

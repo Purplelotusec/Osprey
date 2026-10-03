@@ -190,3 +190,47 @@ describe("OSV cache is never poisoned by a bad response (review finding 1)", () 
     expect(existsSync(cachePath())).toBe(false);
   });
 });
+
+describe("OSV cache fallback: real cause and maximum age (findings D and F)", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  function cacheFor(fetchedAt: string): string {
+    return JSON.stringify({
+      version: 1,
+      packages: { [djangoKey]: { vulnIds: [ADVISORY.id], fetchedAt } },
+      advisories: { [ADVISORY.id]: ADVISORY },
+    });
+  }
+
+  it("reports both the OSV failure and the unusable cache", async () => {
+    freshDir();
+    writeFileSync(cachePath(), "{ corrupt");
+    stubOsvDown();
+    await expect(createOsvAdvisoryFetcher({ cachePath: cachePath() })([django()])).rejects.toThrow(
+      /^OSV lookup failed \(HTTP 400.*\), and the OSV cache can't stand in: OSV cache at .* is unusable/
+    );
+  });
+
+  it("refuses fallback OSV data older than the limit", async () => {
+    freshDir();
+    writeFileSync(cachePath(), cacheFor(new Date(Date.now() - 30 * DAY).toISOString()));
+    stubOsvDown();
+    await expect(createOsvAdvisoryFetcher({ cachePath: cachePath(), maxFallbackAgeMs: 7 * DAY })([django()])).rejects.toThrow(
+      /cached OSV data is 30\.0 days old, past the 7\.0 days limit/
+    );
+  });
+
+  it("allows fallback OSV data within the limit", async () => {
+    freshDir();
+    writeFileSync(cachePath(), cacheFor(new Date(Date.now() - 1 * DAY).toISOString()));
+    stubOsvDown();
+    const lookup = await createOsvAdvisoryFetcher({ cachePath: cachePath(), maxFallbackAgeMs: 7 * DAY })([django()]);
+    expect(lookup.warnings).toEqual([expect.stringContaining("Results may be stale")]);
+  });
+
+  it("does not limit explicit --offline", async () => {
+    freshDir();
+    writeFileSync(cachePath(), cacheFor(new Date(Date.now() - 90 * DAY).toISOString()));
+    const lookup = await createOsvAdvisoryFetcher({ cachePath: cachePath(), offline: true, maxFallbackAgeMs: 7 * DAY })([django()]);
+    expect(lookup.advisories.get(djangoKey)).toHaveLength(1);
+  });
+});

@@ -151,7 +151,7 @@ function toSarifResult(finding: SecurityFinding, manifests: ManifestFiles): Sari
     ...(ruleId ? { ruleId } : {}),
     level: LEVEL[finding.versionStatus],
     message: { text: findingText(finding) },
-    locations: [{ physicalLocation: { artifactLocation: { uri: manifestFor(finding, manifests) } } }],
+    locations: [{ physicalLocation: { artifactLocation: { uri: toUriReference(manifestFor(finding, manifests)) } } }],
   };
 }
 
@@ -159,6 +159,14 @@ function manifestFor(finding: SecurityFinding, manifests: ManifestFiles): string
   const type = finding.component.ecosystem ?? (finding.component.purl ? parsePurl(finding.component.purl)?.type : undefined);
   // Fall back to any known manifest, then the repository root, so a result is never dropped.
   return (type ? manifests[type] : undefined) ?? Object.values(manifests).find(Boolean) ?? ".";
+}
+
+/**
+ * SARIF artifact locations are URI references, so a path like "my app/package-lock.json"
+ * must be percent-encoded ("my%20app/package-lock.json"); "/" stays the separator.
+ */
+function toUriReference(path: string): string {
+  return path.split("/").map((segment) => (segment === "." || segment === ".." ? segment : encodeURIComponent(segment))).join("/");
 }
 
 function findingText(finding: SecurityFinding): string {

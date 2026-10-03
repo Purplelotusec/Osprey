@@ -1,9 +1,9 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { fileURLToPath } from "node:url";
-import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { detectEcosystems, generateSbom } from "../src/sbom/generate/index.js";
+import { detectEcosystems, generateSbom, UNLOCKED_PACKAGE_JSON_WARNING } from "../src/sbom/generate/index.js";
 import { generateSbomFromGitHub } from "../src/sbom/generate/remote.js";
 import { detectAndFetchPackageFiles } from "../src/network/github.js";
 
@@ -139,5 +139,63 @@ describe("remote fetch errors are not mistaken for missing files (review finding
   it("still treats a 404 as 'not there'", async () => {
     stubStatuses({}, { "requirements.txt": "django==4.2.0\n" });
     expect((await detectAndFetchPackageFiles(repo)).map((f) => f.fileName)).toEqual(["requirements.txt"]);
+  });
+});
+
+describe("a package.json without a lockfile is never skipped silently (finding C)", () => {
+  function pythonWithUnlockedFrontend(): string {
+    const dir = mkdtempSync(join(tmpdir(), "osprey-unlocked-"));
+    tempDirs.push(dir);
+    cpSync(fixture("uv-project"), dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "frontend", dependencies: { jquery: "^3.4.1" } }));
+    return dir;
+  }
+
+  it("warns locally that the npm dependencies were not audited", () => {
+    const { ecosystems, warnings } = generateSbom({ projectDir: pythonWithUnlockedFrontend() });
+    expect(ecosystems).toEqual(["python"]);
+    expect(warnings).toContain(UNLOCKED_PACKAGE_JSON_WARNING);
+  });
+
+  it("does not warn when the caller chose the ecosystems explicitly", () => {
+    expect(generateSbom({ projectDir: pythonWithUnlockedFrontend(), ecosystem: "python" }).warnings).not.toContain(UNLOCKED_PACKAGE_JSON_WARNING);
+  });
+
+  it("explains how to fix a package.json-only project instead of 'could not detect'", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osprey-pkgjson-only-"));
+    tempDirs.push(dir);
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: { express: "^4.18.0" } }));
+    expect(() => generateSbom({ projectDir: dir })).toThrow(/Found package\.json but no package-lock\.json .*npm install --package-lock-only/);
+  });
+
+  it("warns with --url too, by checking whether the repo has a package.json", async () => {
+    stubGitHub({ "package.json": '{"name":"frontend","dependencies":{"jquery":"^3.4.1"}}', "requirements.txt": "django==4.2.0\n" });
+    const { ecosystems, warnings } = await generateSbomFromGitHub({ repoInfo: repo });
+    expect(ecosystems).toEqual(["python"]);
+    expect(warnings).toContain(UNLOCKED_PACKAGE_JSON_WARNING);
+  });
+
+  it("a repo with a real npm lockfile gets no such warning", async () => {
+    stubGitHub({ "package-lock.json": read("npm-project", "package-lock.json"), "package.json": read("npm-project", "package.json"), "requirements.txt": "django==4.2.0\n" });
+    expect((await generateSbomFromGitHub({ repoInfo: repo })).warnings).not.toContain(UNLOCKED_PACKAGE_JSON_WARNING);
+  });
+});
+
+describe("package.json locked by another package manager (finding C, refined on real repos)", () => {
+  it("names the pnpm lockfile instead of advising a package-lock.json", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osprey-pnpm-"));
+    tempDirs.push(dir);
+    cpSync(fixture("uv-project"), dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "frontend" }));
+    writeFileSync(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    const { warnings } = generateSbom({ projectDir: dir });
+    expect(warnings).toContain("Found package.json locked by pnpm-lock.yaml, which Osprey can't read yet: its JavaScript dependencies were NOT audited.");
+    expect(warnings).not.toContain(UNLOCKED_PACKAGE_JSON_WARNING);
+  });
+
+  it("does the same with --url (e.g. a Sentry/Zulip-style repo)", async () => {
+    stubGitHub({ "uv.lock": read("uv-project", "uv.lock"), "package.json": '{"name":"frontend"}', "pnpm-lock.yaml": "lockfileVersion: '9.0'\n" });
+    const { warnings } = await generateSbomFromGitHub({ repoInfo: repo });
+    expect(warnings).toEqual(expect.arrayContaining([expect.stringContaining("locked by pnpm-lock.yaml")]));
   });
 });

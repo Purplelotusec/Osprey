@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { Command, Option } from "commander";
+import { Command, Option, InvalidArgumentError } from "commander";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { homedir } from "node:os";
-import { pollKev } from "../src/vulnerability/kev.js";
+import { DEFAULT_MAX_CACHE_AGE_DAYS, parseMaxCacheAgeDays, pollKev } from "../src/vulnerability/kev.js";
 import { crossCheckWithAdvisories } from "../src/correlation/matcher.js";
 import { generateSbom } from "../src/sbom/generate/index.js";
 import { generateSbomFromGitHub } from "../src/sbom/generate/remote.js";
@@ -13,6 +13,15 @@ import { createOsvAdvisoryFetcher } from "../src/vulnerability/osv-cache.js";
 import { printAuditReport, printAuditSummary } from "../src/output/audit-report.js";
 import type { NormalizedComponent } from "../src/sbom/types.js";
 import type { SboimResult } from "../src/vulnerability/types.js";
+
+/** --max-cache-age parser that reports bad values the way commander expects. */
+const maxCacheAgeArg = (value: string) => {
+  try {
+    return parseMaxCacheAgeDays(value);
+  } catch (err) {
+    throw new InvalidArgumentError((err as Error).message);
+  }
+};
 
 const program = new Command();
 
@@ -24,6 +33,7 @@ program
   .option("--cache <file>", "KEV cache file path", join(homedir(), ".osprey", "kev-cache.json"))
   .option("--osv-cache <file>", "OSV advisory cache file path", join(homedir(), ".osprey", "osv-cache.json"))
   .option("--offline", "use only cached KEV and OSV data (no vulnerability-data requests; fails if anything isn't cached)", false)
+  .option("--max-cache-age <days>", "oldest cached KEV/OSV data an automatic fallback may use when the network fails (does not limit --offline)", maxCacheAgeArg, parseMaxCacheAgeDays(String(DEFAULT_MAX_CACHE_AGE_DAYS)))
   .option("--output <file>", "write detailed JSON result to file")
   .option("--verbose", "show detailed output with additional information", false)
   .option("--fail-on-high", "exit with error code if high-confidence vulnerabilities found", false)
@@ -58,7 +68,7 @@ program
         subjectName,
         webhookUrl: undefined,
         failOnHigh: options.failOnHigh,
-        lookupAdvisories: createOsvAdvisoryFetcher({ cachePath: resolve(options.osvCache), offline: options.offline }),
+        lookupAdvisories: createOsvAdvisoryFetcher({ cachePath: resolve(options.osvCache), offline: options.offline, maxFallbackAgeMs: options.maxCacheAge }),
         generateComponents: async () => {
           console.log(isRemote ? "Analyzing repository..." : "Analyzing project...");
           const sbomResult = isRemote
@@ -70,14 +80,15 @@ program
             `${ecosystem} (${sbomResult.sbom.components.filter((c) => (ecosystem === "python" ? c.ecosystem === "pypi" : c.ecosystem === ecosystem)).length})`
           );
           console.log(`Ecosystems: ${counts.join(", ")}`);
-          for (const warning of sbomResult.warnings) console.warn(`Warning: ${warning}`);
-          return sbomResult.sbom.components;
+          // Returned, not just printed: the report and --output JSON both carry them.
+          return { components: sbomResult.sbom.components, warnings: sbomResult.warnings };
         },
         pollKev: async () => {
           console.log("Checking for vulnerabilities...");
           const snapshot = await pollKev({
             cachePath: resolve(options.cache),
             offline: options.offline,
+            maxFallbackAgeMs: options.maxCacheAge,
           });
           return snapshot;
         },

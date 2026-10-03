@@ -1,7 +1,7 @@
 import { writeFileSync, mkdirSync, mkdtempSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { tmpdir } from "node:os";
-import { generateSbom, type GenerateResult } from "./index.js";
+import { generateSbom, unauditedPackageJsonWarning, UNSUPPORTED_JS_LOCKFILES, type GenerateResult } from "./index.js";
 import { findRequirementIncludes } from "./requirements.js";
 import type { GitHubRepoInfo } from "../../network/github.js";
 import { detectAndFetchPackageFiles, fetchOptionalGitHubFile } from "../../network/github.js";
@@ -38,10 +38,21 @@ export async function generateSbomFromGitHub(options: RemoteGenerationOptions): 
 
     // Generate exactly the ecosystems that were fetched — a package.json fetched
     // only as a companion must not turn into an npm audit of its ranges.
-    const result = generateSbom({
-      projectDir: tempDir,
-      ecosystems: [...new Set(packageFiles.map((file) => file.ecosystem))],
-    });
+    const ecosystems = [...new Set(packageFiles.map((file) => file.ecosystem))];
+    const result = generateSbom({ projectDir: tempDir, ecosystems });
+
+    // Python found but no npm lockfile: say so if a package.json is being left out,
+    // naming the pnpm/Yarn/Bun lockfile in use if there is one.
+    if (!ecosystems.includes("npm") && (await fetchOptionalGitHubFile(repoInfo, "package.json", { token })) !== undefined) {
+      let otherLockfile: string | undefined;
+      for (const file of UNSUPPORTED_JS_LOCKFILES) {
+        if ((await fetchOptionalGitHubFile(repoInfo, file, { token })) !== undefined) {
+          otherLockfile = file;
+          break;
+        }
+      }
+      result.warnings.push(unauditedPackageJsonWarning(otherLockfile));
+    }
 
     // Update subject name to reflect the GitHub repo
     const subjectName = path

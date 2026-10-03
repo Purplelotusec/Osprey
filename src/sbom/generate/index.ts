@@ -49,14 +49,23 @@ export function generateSbom(opts: GenerateOptions): GenerateResult {
   if (opts.ecosystem !== undefined && !ECOSYSTEMS.includes(opts.ecosystem)) {
     throw new Error(`Unsupported ecosystem "${opts.ecosystem}" — expected one of: ${ECOSYSTEMS.join(", ")}.`);
   }
+  const autoDetected = opts.ecosystems === undefined && opts.ecosystem === undefined;
   const ecosystems = opts.ecosystems ?? (opts.ecosystem ? [opts.ecosystem] : detectEcosystems(opts.projectDir));
+  const unlockedPackageJson = existsSync(join(opts.projectDir, "package.json")) && !existsSync(join(opts.projectDir, "package-lock.json"));
   if (ecosystems.length === 0) {
     throw new Error(
-      `Could not detect a supported project type in ${opts.projectDir} — looked for package-lock.json (npm) and ${PYTHON_MANIFESTS.join(", ")} (Python). Pass --ecosystem to force one, or generate the SBOM from another tool and use the ingestion path instead.`
+      unlockedPackageJson
+        ? `Found package.json but no package-lock.json in ${opts.projectDir}, so there are no exact npm versions to audit. Create a lockfile (npm install --package-lock-only) and commit it, or use cra-sbom --ecosystem npm to audit the package.json ranges as lower bounds.`
+        : `Could not detect a supported project type in ${opts.projectDir} — looked for package-lock.json (npm) and ${PYTHON_MANIFESTS.join(", ")} (Python). Pass --ecosystem to force one, or generate the SBOM from another tool and use the ingestion path instead.`
     );
   }
 
   const results = ecosystems.map((ecosystem) => GENERATORS[ecosystem](opts.projectDir));
+  const warnings = results.flatMap((result) => result.warnings);
+  // A frontend without a lockfile next to a Python backend must not be skipped silently.
+  if (autoDetected && !ecosystems.includes("npm") && unlockedPackageJson) {
+    warnings.push(unauditedPackageJsonWarning(UNSUPPORTED_JS_LOCKFILES.find((file) => existsSync(join(opts.projectDir, file)))));
+  }
   // The subject is the first ecosystem's project, in ECOSYSTEMS order, so it is stable.
   const [primary] = results;
 
@@ -72,7 +81,20 @@ export function generateSbom(opts: GenerateOptions): GenerateResult {
     components: results.flatMap((result) => result.components),
   };
 
-  return { sbom, warnings: results.flatMap((result) => result.warnings), ecosystems };
+  return { sbom, warnings, ecosystems };
+}
+
+export const UNLOCKED_PACKAGE_JSON_WARNING =
+  "Found package.json without package-lock.json: its npm dependencies were NOT audited. Commit a lockfile (npm install --package-lock-only) to include them.";
+
+/** Lockfiles of other JavaScript package managers, which Osprey doesn't read yet. */
+export const UNSUPPORTED_JS_LOCKFILES = ["pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb"];
+
+/** The warning for a package.json Osprey isn't auditing, naming the lockfile actually in use if there is one. */
+export function unauditedPackageJsonWarning(otherLockfile: string | undefined): string {
+  return otherLockfile
+    ? `Found package.json locked by ${otherLockfile}, which Osprey can't read yet: its JavaScript dependencies were NOT audited.`
+    : UNLOCKED_PACKAGE_JSON_WARNING;
 }
 
 /**

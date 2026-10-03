@@ -2,7 +2,7 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pollKev, readCache } from "../src/vulnerability/kev.js";
+import { parseMaxCacheAgeDays, pollKev, readCache } from "../src/vulnerability/kev.js";
 import type { KevSnapshot } from "../src/vulnerability/types.js";
 
 const feedEntry = {
@@ -118,5 +118,53 @@ describe("KEV cache write failures (review finding 4)", () => {
     const result = await pollKev({ cachePath: join(notADirectory, "kev-cache.json") });
     expect(result.entries).toHaveLength(1);
     expect(result.warnings).toEqual([expect.stringMatching(/Could not update the KEV cache at .*kev-cache\.json/)]);
+  });
+});
+
+const DAY = 24 * 60 * 60 * 1000;
+const daysAgo = (n: number) => new Date(Date.now() - n * DAY).toISOString();
+
+describe("cache fallback errors keep the real cause (finding D)", () => {
+  it("reports both the failed fetch and the unusable cache", async () => {
+    freshDir();
+    writeCacheFile("{ corrupt");
+    stubFeed({}, 503);
+    const error = await pollKev({ cachePath: cachePath() }).catch((e: Error) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/^Live KEV fetch failed \(HTTP 503.*\), and the KEV cache can't stand in: KEV cache at .* is unusable \(not valid JSON/);
+  });
+});
+
+describe("maximum age for automatic cache fallback (finding F)", () => {
+  it("refuses a fallback cache older than the limit, explaining the options", async () => {
+    freshDir();
+    writeCacheFile({ ...snapshot, fetchedAt: daysAgo(30) });
+    stubFeed({}, 503);
+    await expect(pollKev({ cachePath: cachePath(), maxFallbackAgeMs: 7 * DAY })).rejects.toThrow(
+      /Live KEV fetch failed \(HTTP 503.*\), and the cached KEV snapshot is 30\.0 days old, past the 7\.0 days limit for automatic fallback\. .*--max-cache-age.*--offline/
+    );
+  });
+
+  it("uses a fallback cache within the limit, with the staleness warning", async () => {
+    freshDir();
+    writeCacheFile({ ...snapshot, fetchedAt: daysAgo(2) });
+    stubFeed({}, 503);
+    const result = await pollKev({ cachePath: cachePath(), maxFallbackAgeMs: 7 * DAY });
+    expect(result.warnings).toEqual([expect.stringContaining("Results may be stale")]);
+  });
+
+  it("does not limit explicit --offline", async () => {
+    freshDir();
+    writeCacheFile({ ...snapshot, fetchedAt: daysAgo(90) });
+    const result = await pollKev({ cachePath: cachePath(), offline: true, maxFallbackAgeMs: 7 * DAY });
+    expect(result.warnings).toEqual([expect.stringContaining("Offline: using cached KEV snapshot")]);
+  });
+
+  it("parses --max-cache-age and rejects bad values", () => {
+    expect(parseMaxCacheAgeDays("7")).toBe(7 * DAY);
+    expect(parseMaxCacheAgeDays("0.5")).toBe(DAY / 2);
+    expect(parseMaxCacheAgeDays("0")).toBe(0);
+    expect(() => parseMaxCacheAgeDays("-1")).toThrow(/>= 0/);
+    expect(() => parseMaxCacheAgeDays("abc")).toThrow(/>= 0/);
   });
 });

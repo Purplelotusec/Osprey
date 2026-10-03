@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { homedir } from "node:os";
-import { pollKev } from "../src/vulnerability/kev.js";
+import { DEFAULT_MAX_CACHE_AGE_DAYS, parseMaxCacheAgeDays, pollKev } from "../src/vulnerability/kev.js";
 import { crossCheckWithAdvisories } from "../src/correlation/matcher.js";
 import { sendCrossCheckAlert, printCrossCheckResults } from "../src/alerting/webhook.js";
 import { generateSbom } from "../src/sbom/generate/index.js";
@@ -12,6 +12,15 @@ import { createOsvAdvisoryFetcher } from "../src/vulnerability/osv-cache.js";
 import { z } from "zod";
 import type { NormalizedComponent } from "../src/sbom/types.js";
 import type { SboimResult } from "../src/vulnerability/types.js";
+
+/** --max-cache-age parser that reports bad values the way commander expects. */
+const maxCacheAgeArg = (value: string) => {
+  try {
+    return parseMaxCacheAgeDays(value);
+  } catch (err) {
+    throw new InvalidArgumentError((err as Error).message);
+  }
+};
 
 const program = new Command();
 
@@ -24,6 +33,7 @@ program
   .option("--cache <file>", "KEV cache file, used as fallback on fetch failure", join(homedir(), ".osprey", "kev-cache.json"))
   .option("--osv-cache <file>", "OSV advisory cache, used as fallback on lookup failure", join(homedir(), ".osprey", "osv-cache.json"))
   .option("--offline", "use only the cached KEV and OSV data (no vulnerability-data requests; fails if anything isn't cached)", false)
+  .option("--max-cache-age <days>", "oldest cached KEV/OSV data an automatic fallback may use when the network fails (does not limit --offline)", maxCacheAgeArg, parseMaxCacheAgeDays(String(DEFAULT_MAX_CACHE_AGE_DAYS)))
   .option("--webhook <url>", "Slack-compatible webhook URL to alert on matches")
   .option("--result <file>", "write a structured machine-readable SBOIM result JSON file")
   .option("--fail-on-high", "exit non-zero if any high-confidence match is found (for CI gating)", false)
@@ -36,16 +46,15 @@ program
       webhookUrl: options.webhook,
       failOnHigh: options.failOnHigh,
       pipeline,
-      lookupAdvisories: createOsvAdvisoryFetcher({ cachePath: resolve(options.osvCache), offline: options.offline }),
+      lookupAdvisories: createOsvAdvisoryFetcher({ cachePath: resolve(options.osvCache), offline: options.offline, maxFallbackAgeMs: options.maxCacheAge }),
       generateComponents: () => {
-        const components = options.sbom
-          ? loadComponentsFromSbomFile(resolve(options.sbom))
-          : generateSbom({ projectDir: resolve(options.path) }).sbom.components;
-        return components;
+        if (options.sbom) return loadComponentsFromSbomFile(resolve(options.sbom));
+        const generated = generateSbom({ projectDir: resolve(options.path) });
+        return { components: generated.sbom.components, warnings: generated.warnings };
       },
       pollKev: async () => {
         console.log(`Polling CISA KEV...`);
-        const snapshot = await pollKev({ cachePath: resolve(options.cache), offline: options.offline });
+        const snapshot = await pollKev({ cachePath: resolve(options.cache), offline: options.offline, maxFallbackAgeMs: options.maxCacheAge });
         console.log(`Loaded ${snapshot.entries.length} KEV entries (as of ${snapshot.dateReleased ?? snapshot.fetchedAt})`);
         return snapshot;
       },
