@@ -154,7 +154,7 @@ export function toCycloneDxJson(sbom: NormalizedSbom): string {
       scope: c.isDirect ? "required" : "optional",
     })),
   };
-  // Canonical, stable key ordering matters for hashing/signing reproducibility —
-  // JSON.stringify preserves insertion order for string keys, which is what we want here.
+  // The signature covers these exact bytes, so key order must be deterministic:
+  // JSON.stringify keeps insertion order for string keys, i.e. the order written above.
   return JSON.stringify(doc, null, 2);
 }

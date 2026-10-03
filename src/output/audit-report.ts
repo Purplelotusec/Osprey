@@ -9,12 +9,11 @@ export interface AuditReportOptions {
 export function printAuditReport(result: SboimResult, options: AuditReportOptions = {}): void {
   const { verbose = false } = options;
 
-  // Header
   console.log(section("Vulnerability Audit"));
   console.log(packagesCheckedText(result));
   console.log();
 
-  // Overall status - VERSION-AWARE
+  // The headline counts installed versions that are actually affected, not every KEV match.
   const hasAffected = result.affectedCount > 0;
   const hasNotAffected = result.notAffectedCount > 0;
   const hasUnknown = result.unknownCount > 0;
@@ -44,7 +43,6 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
     printFindings(result.matches, { verbose });
   }
 
-  // Warnings
   if (result.warnings.length > 0) {
     console.log(section("Warnings"));
     for (const warning of result.warnings) {
@@ -52,7 +50,6 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
     }
   }
 
-  // Errors
   if (result.errors.length > 0) {
     console.log(section("Errors"));
     for (const error of result.errors) {
@@ -60,7 +57,7 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
     }
   }
 
-  // Summary (only show if verbose or has issues)
+  // A clean, complete run needs no verdict section unless asked for one.
   if (verbose || incomplete || result.affectedCount > 0 || result.matches.length > 0) {
     console.log(section("Summary"));
     console.log(`Status: ${statusLabel(result)}`);
@@ -71,9 +68,10 @@ export function printAuditReport(result: SboimResult, options: AuditReportOption
 /** "120 packages checked", or "118 of 120 packages checked" when some couldn't be (see the warnings). */
 export function packagesCheckedText(result: SboimResult): string {
   const checked = result.checkedComponentCount ?? result.sbomComponentCount;
+  const packages = (n: number) => `${n} package${n === 1 ? "" : "s"}`;
   return checked === result.sbomComponentCount
-    ? `${checked} packages checked`
-    : `${checked} of ${result.sbomComponentCount} packages checked`;
+    ? `${packages(checked)} checked`
+    : `${checked} of ${packages(result.sbomComponentCount)} checked`;
 }
 
 /** A run that hit an error (failed stage) never produced a complete answer, whatever its counts say. */
@@ -108,7 +106,7 @@ function printFindings(findings: SecurityFinding[], options: FindingsPrintOption
 
     console.log();
     console.log(bold(`${num}. ${finding.kevEntry.cveId}`));
-    console.log(`   Component: ${colorize(finding.component.name, "cyan")}${finding.component.version ? `@${finding.component.version}` : ""}`);
+    console.log(`   Component: ${colorize(osvPackage(finding.component)?.name ?? finding.component.name, "cyan")}${finding.component.version ? `@${finding.component.version}` : ""}`);
 
     if (finding.component.purl) {
       console.log(`   PURL: ${dim(finding.component.purl)}`);
@@ -116,11 +114,7 @@ function printFindings(findings: SecurityFinding[], options: FindingsPrintOption
 
     console.log(`   Vulnerability: ${finding.kevEntry.vulnerabilityName}`);
 
-    // Version status
-    const versionStatusText = getVersionStatusText(finding);
-    console.log(`   Version Status: ${versionStatusText}`);
-
-    // KEV details
+    console.log(`   Version Status: ${getVersionStatusText(finding)}`);
     console.log(`   Product: ${finding.kevEntry.product} (${finding.kevEntry.vendorProject})`);
     console.log(`   Description: ${finding.kevEntry.shortDescription}`);
 
@@ -136,12 +130,10 @@ function printFindings(findings: SecurityFinding[], options: FindingsPrintOption
       console.log(`   ${colorize("⚠ Known Ransomware Use", "red")}`);
     }
 
-    // Advisory information
     if (finding.advisoryIds.length > 0) {
       console.log(`   Advisories: ${finding.advisoryIds.join(", ")}`);
     }
 
-    // Remediation - show patched version if available
     console.log();
     if (finding.versionStatus === "affected" && finding.patchedVersion) {
       console.log(colorize(`   ${symbols.warning} REMEDIATION:`, "yellow"));
@@ -157,9 +149,7 @@ function printFindings(findings: SecurityFinding[], options: FindingsPrintOption
       console.log(`   ${dim("Your current version is not affected by this vulnerability.")}`);
     }
 
-    // Verbose mode
     if (options.verbose) {
-      console.log(`   Confidence: ${finding.confidence}`);
       console.log(`   Matched On: ${finding.matchedOn}`);
       console.log(`   Date Added to KEV: ${finding.kevEntry.dateAdded}`);
     }
@@ -212,13 +202,13 @@ export function printAuditSummary(result: SboimResult): void {
   if (!hasMatches) {
     console.log(colorize(`\n${symbols.success} No active exploitable vulnerabilities detected\n`, "green"));
   } else {
-    // Show status breakdown
     console.log();
     if (hasAffected) {
       console.log(colorize(`${symbols.error} ${result.affectedCount} VULNERABLE package(s) actively exploited`, "red"));
-    } else {
+    } else if (result.unknownCount === 0) {
       console.log(colorize(`${symbols.success} All packages are safe (patched or unaffected)`, "green"));
     }
+    // With unknowns and no affected installs, claim nothing: "unknown" is not "safe".
 
     if (result.notAffectedCount > 0) {
       console.log(colorize(`${symbols.success} ${result.notAffectedCount} package(s) have CVE but are SAFE (patched)`, "green"));
@@ -228,12 +218,11 @@ export function printAuditSummary(result: SboimResult): void {
     }
     console.log();
 
-    // Show detailed table for affected packages
     if (hasAffected) {
       const affected = result.matches.filter((m) => m.versionStatus === "affected");
       const rows = affected.map((finding) => [
         colorize(symbols.error, "red"),
-        finding.component.name,
+        osvPackage(finding.component)?.name ?? finding.component.name,
         finding.currentVersion ?? "unknown",
         finding.kevEntry.cveId,
         finding.patchedVersion ? colorize(finding.patchedVersion, "green") : "see advisory",

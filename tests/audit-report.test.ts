@@ -81,3 +81,32 @@ describe("audit report for an incomplete run", () => {
     expect(captureOutput(() => printAuditSummary(result()))).toContain("No active exploitable vulnerabilities detected");
   });
 });
+
+describe("summary view never calls unknown versions safe", () => {
+  const finding = (versionStatus: "affected" | "not_affected" | "unknown") => ({
+    component: { ecosystem: "maven", namespace: "org.example", name: "lib", version: "1.0.0-custom" },
+    kevEntry: { cveId: "CVE-2026-1", vendorProject: "v", product: "p", vulnerabilityName: "n", dateAdded: "d", shortDescription: "s" },
+    confidence: "high" as const,
+    matchedOn: "cve_from_osv" as const,
+    identityConfidence: "high" as const,
+    versionStatus,
+    exploitationStatus: "known_exploited" as const,
+    advisoryIds: [],
+  });
+
+  it("does not claim 'All packages are safe' when a version status is unknown", () => {
+    const output = captureOutput(() => printAuditSummary(result({ matches: [finding("unknown")], unknownCount: 1 })));
+    expect(output).not.toContain("All packages are safe");
+    expect(output).toContain("1 package(s) with UNKNOWN version status");
+  });
+
+  it("still says all safe when every match is patched", () => {
+    const output = captureOutput(() => printAuditSummary(result({ matches: [finding("not_affected")], notAffectedCount: 1 })));
+    expect(output).toContain("All packages are safe");
+  });
+
+  it("shows the full Maven coordinate in the affected table", () => {
+    const output = captureOutput(() => printAuditSummary(result({ matches: [finding("affected")], affectedCount: 1 })));
+    expect(output).toContain("org.example:lib");
+  });
+});

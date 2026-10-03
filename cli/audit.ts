@@ -45,25 +45,18 @@ program
   .action(async (options) => {
     const startTime = Date.now();
 
-    // Validate options
     if (options.url && options.path !== ".") {
       console.error("Error: Cannot specify both --url and --path options");
       process.exit(1);
     }
 
-    // Get GitHub token from option or environment
     const githubToken = options.githubToken ?? process.env.GITHUB_TOKEN;
-
-    // Determine subject
     const isRemote = Boolean(options.url);
-    const subjectName = isRemote
-      ? options.url
-      : resolve(options.path);
+    const subjectName = isRemote ? options.url : resolve(options.path);
 
     try {
       console.log(`Auditing: ${subjectName}\n`);
 
-      // Run KEV check
       const result = await runKevCheck({
         subjectName,
         webhookUrl: undefined,
@@ -92,17 +85,12 @@ program
           });
           return snapshot;
         },
-        crossCheck: (components, entries, advisories) => {
-          return crossCheckWithAdvisories(components, entries, advisories);
-        },
-        sendAlert: async () => {
-          // No webhook alert in audit command
-        },
+        crossCheck: crossCheckWithAdvisories,
+        sendAlert: async () => {}, // cra has no webhook; alerting lives in cra-kev
       });
 
       const duration = Date.now() - startTime;
 
-      // Write output file if requested
       if (options.output) {
         const outputPath = resolve(options.output);
         mkdirSync(dirname(outputPath), { recursive: true });
@@ -110,17 +98,14 @@ program
         console.log(`\nDetailed results written to: ${outputPath}`);
       }
 
-      // Print report
       if (options.summary) {
         printAuditSummary(result);
       } else {
         printAuditReport(result, { verbose: options.verbose });
       }
-
-      // Print timing
       console.log(`Audit completed in ${(duration / 1000).toFixed(2)}s\n`);
 
-      // Exit with appropriate code
+      // Exit 1 for an affected install under --fail-on-high, or for any failed (incomplete) run.
       if (options.failOnHigh && result.affectedCount > 0) {
         console.error(`\nFound ${result.affectedCount} actively exploited vulnerable package(s).`);
         process.exit(1);

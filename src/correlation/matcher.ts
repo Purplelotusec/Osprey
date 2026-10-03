@@ -18,58 +18,35 @@ export interface CrossCheckMatch {
 }
 
 /**
- * CVE-based cross-checking strategy:
+ * Reports each component whose OSV advisories name a CVE that is in CISA KEV.
  *
- * We NO LONGER match by fuzzy name comparison (too many false positives).
- * Instead, we:
- * 1. Query OSV for vulnerabilities in each package
- * 2. Extract CVE IDs from OSV advisories
- * 3. Check if those CVE IDs appear in CISA KEV
- * 4. Only report packages where OSV CVE = KEV CVE (actively exploited)
- *
- * This ensures we only flag packages with CONFIRMED vulnerabilities that
- * are ACTUALLY being exploited in the wild according to CISA.
+ * Matching is by CVE ID only. KEV identifies software by free-text vendor and
+ * product names, which don't map reliably onto package names, so name matching
+ * is deliberately not attempted: a package is linked to a KEV entry only through
+ * an OSV advisory for that exact package.
  */
 export function crossCheckWithAdvisories(
   components: NormalizedComponent[],
   kevEntries: KevEntry[],
   advisoriesByPackage: Map<string, OsvAdvisory[]>
 ): CrossCheckMatch[] {
+  const kevByCve = new Map(kevEntries.map((entry) => [entry.cveId.toUpperCase(), entry]));
   const matches: CrossCheckMatch[] = [];
-  const kevCveMap = new Map<string, KevEntry>();
 
-  // Index KEV entries by CVE ID for fast lookup
-  for (const entry of kevEntries) {
-    kevCveMap.set(entry.cveId.toUpperCase(), entry);
-  }
-
-  // For each component, check if its OSV vulnerabilities appear in KEV
   for (const component of components) {
     const pkg = osvPackage(component);
     if (!pkg) continue;
 
-    const advisories = advisoriesByPackage.get(osvPackageKey(pkg)) ?? [];
     // Several advisories (e.g. GHSA-… and PYSEC-…) often alias the same CVE;
     // report each (component, CVE) once. Enrichment still cites every advisory.
     const matchedCves = new Set<string>();
 
-    for (const advisory of advisories) {
-      // Check if this advisory's CVE is in CISA KEV
-      const cveIds = extractCveIds(advisory);
-
-      for (const cveId of cveIds) {
-        const normalizedCve = cveId.toUpperCase();
-        const kevEntry = kevCveMap.get(normalizedCve);
-        if (kevEntry && !matchedCves.has(normalizedCve)) {
-          matchedCves.add(normalizedCve);
-          // This CVE is actively exploited!
-          matches.push({
-            component,
-            kevEntry,
-            confidence: "high", // High confidence because it's based on exact CVE match
-            matchedOn: "cve_from_osv",
-          });
-        }
+    for (const advisory of advisoriesByPackage.get(osvPackageKey(pkg)) ?? []) {
+      for (const cveId of cveIdsOf(advisory)) {
+        const kevEntry = kevByCve.get(cveId);
+        if (!kevEntry || matchedCves.has(cveId)) continue;
+        matchedCves.add(cveId);
+        matches.push({ component, kevEntry, confidence: "high", matchedOn: "cve_from_osv" });
       }
     }
   }
@@ -77,20 +54,9 @@ export function crossCheckWithAdvisories(
   return matches;
 }
 
-function extractCveIds(advisory: OsvAdvisory): string[] {
-  const cves: string[] = [];
-
-  // Check advisory ID itself
-  if (advisory.id.startsWith("CVE-")) {
-    cves.push(advisory.id);
-  }
-
-  // Check aliases
-  for (const alias of advisory.aliases ?? []) {
-    if (alias.startsWith("CVE-")) {
-      cves.push(alias);
-    }
-  }
-
-  return cves;
+/** The CVE IDs an advisory refers to: its own ID (for CVE-sourced advisories) and its aliases. */
+function cveIdsOf(advisory: OsvAdvisory): string[] {
+  return [advisory.id, ...(advisory.aliases ?? [])]
+    .filter((id) => id.startsWith("CVE-"))
+    .map((id) => id.toUpperCase());
 }

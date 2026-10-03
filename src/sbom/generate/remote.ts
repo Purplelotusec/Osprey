@@ -1,4 +1,4 @@
-import { writeFileSync, mkdirSync, mkdtempSync } from "node:fs";
+import { writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { tmpdir } from "node:os";
 import { generateSbom, unauditedPackageJsonWarning, UNSUPPORTED_JS_LOCKFILES, type GenerateResult } from "./index.js";
@@ -54,25 +54,15 @@ export async function generateSbomFromGitHub(options: RemoteGenerationOptions): 
       result.warnings.push(unauditedPackageJsonWarning(otherLockfile));
     }
 
-    // Update subject name to reflect the GitHub repo
-    const subjectName = path
-      ? `${owner}/${repo}/${path}`
-      : `${owner}/${repo}`;
-
-    return {
-      ...result,
-      sbom: {
-        ...result.sbom,
-        subjectName,
-      },
-    };
+    // Label the SBOM with the repository, not the temp directory it was built in.
+    const subjectName = path ? `${owner}/${repo}/${path}` : `${owner}/${repo}`;
+    return { ...result, sbom: { ...result.sbom, subjectName } };
   } finally {
-    // Clean up temp directory (best effort)
+    // Best effort: a leftover temp directory must not turn a finished audit into a failure.
     try {
-      const { rmSync } = await import("node:fs");
       rmSync(tempDir, { recursive: true, force: true });
     } catch {
-      // Ignore cleanup errors
+      /* ignored */
     }
   }
 }

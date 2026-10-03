@@ -61,7 +61,7 @@ export function formatTable(rows: string[][], options?: { indent?: number }): st
   const columnCount = Math.max(...rows.map((row) => row.length));
   const columnWidths: number[] = Array(columnCount).fill(0);
 
-  // Calculate column widths (accounting for ANSI codes)
+  // Widths use visible length: ANSI colour codes take bytes but no columns.
   for (const row of rows) {
     for (let i = 0; i < row.length; i++) {
       const visibleLength = stripAnsi(row[i] ?? "").length;
@@ -69,7 +69,6 @@ export function formatTable(rows: string[][], options?: { indent?: number }): st
     }
   }
 
-  // Format rows
   return rows
     .map((row) => {
       const cells = row.map((cell, i) => {

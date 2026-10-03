@@ -7,26 +7,21 @@ export interface GitHubRepoInfo {
   path?: string;
 }
 
+/**
+ * Accepts the forms people paste: `owner/repo`, `github.com/owner/repo`,
+ * `https://github.com/owner/repo(.git)`, and `…/tree/<branch>[/sub/dir]` to
+ * pick a branch and a subdirectory. (A branch name containing "/" can't be told
+ * apart from a subdirectory in this form.)
+ */
 export function parseGitHubUrl(url: string): GitHubRepoInfo {
-  // Support various GitHub URL formats:
-  // - https://github.com/owner/repo
-  // - https://github.com/owner/repo/tree/branch
-  // - https://github.com/owner/repo/tree/branch/path/to/dir
-  // - github.com/owner/repo
-  // - owner/repo
-
-  let cleanUrl = url.trim();
-
-  // Remove protocol if present
-  cleanUrl = cleanUrl.replace(/^https?:\/\//, "");
-
-  // Remove github.com if present
-  cleanUrl = cleanUrl.replace(/^github\.com\//, "");
-
-  // Remove trailing slash
-  cleanUrl = cleanUrl.replace(/\/$/, "");
+  const cleanUrl = url
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/^(www\.)?github\.com\//, "")
+    .replace(/\/+$/, "");
 
   const parts = cleanUrl.split("/");
+  if (parts[1]) parts[1] = parts[1].replace(/\.git$/, ""); // clone URLs end in .git
 
   if (parts.length < 2) {
     throw new Error(`Invalid GitHub URL format: ${url}. Expected format: owner/repo or https://github.com/owner/repo`);
@@ -41,7 +36,6 @@ export function parseGitHubUrl(url: string): GitHubRepoInfo {
   let branch: string | undefined;
   let path: string | undefined;
 
-  // Parse tree/branch/path format
   if (rest.length > 0 && rest[0] === "tree") {
     branch = rest[1];
     if (rest.length > 2) {

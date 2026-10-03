@@ -46,7 +46,7 @@ export function generateFromNpmProject(projectDir: string): NpmGenerationResult 
   }
   const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
 
-  // Try to use lock file first (precise versions)
+  // The lockfile records what is actually installed; package.json only declares ranges.
   if (existsSync(lockPath)) {
     const lock: PackageLockV2V3 = JSON.parse(readFileSync(lockPath, "utf-8"));
     const components: NormalizedComponent[] =
@@ -60,7 +60,6 @@ export function generateFromNpmProject(projectDir: string): NpmGenerationResult 
     };
   }
 
-  // Fallback to package.json (version ranges - less precise)
   const { components, skipped } = parsePackageJson(pkgJson);
   const warnings = [
     "No package-lock.json: npm versions are the lowest each package.json range allows, not what is installed. Commit a lockfile for exact results.",

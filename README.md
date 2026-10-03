@@ -1,16 +1,12 @@
 #  Osprey
 
-<img width="1024" height="309" alt="image" src="https://github.com/user-attachments/assets/87cfc0e3-2984-478a-814e-64ac755f515a" />
+<img width="1024" height="309" alt="Osprey" src="https://github.com/user-attachments/assets/87cfc0e3-2984-478a-814e-64ac755f515a" />
 
-
-
-
-https://www.purplelotus.space/blog/introducing-osprey
-
-<img width="753" height="181" alt="image" src="https://github.com/user-attachments/assets/7cba3dda-a61a-42b0-b61e-cbabd8689dac" />
-
+<img width="753" height="181" alt="Osprey audit output" src="https://github.com/user-attachments/assets/7cba3dda-a61a-42b0-b61e-cbabd8689dac" />
 
 Osprey is a CLI (`cra`) that builds a Software Bill of Materials (SBOM) from your project, cross-checks every component against the [CISA Known Exploited Vulnerabilities (KEV)](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) catalog, and tells you which dependencies are *actively exploited in the wild*, not merely "have a CVE".
+
+Read the announcement: [Introducing Osprey](https://www.purplelotus.space/blog/introducing-osprey).
 
 ---
 
@@ -22,11 +18,8 @@ Osprey is a CLI (`cra`) that builds a Software Bill of Materials (SBOM) from you
 - [CLI Reference](#cli-reference)
 - [Understanding the Output](#understanding-the-output)
 - [Structured Results & CI](#structured-results--ci)
-- [Configuration](#configuration)
-- [Architecture](#architecture)
 - [Development](#development)
 - [Supported Ecosystems & Limitations](#supported-ecosystems--limitations)
-- [Security Notes](#security-notes)
 
 ---
 
@@ -35,7 +28,7 @@ Osprey is a CLI (`cra`) that builds a Software Bill of Materials (SBOM) from you
 | | |
 |---|---|
 |  **KEV detection** | Cross-checks components against CISA's KEV catalog |
-|  **Exact CVE matching** | Links each package to its CVEs through OSV advisories. No name guessing, so no "WordPress Core" false positives |
+|  **Exact CVE matching** | Links each package to its CVEs through OSV advisories for that exact package, never by name similarity |
 |  **Version intelligence** | Uses [OSV](https://osv.dev) to decide whether your *installed* version is actually affected, comparing versions with each ecosystem's own rules |
 |  **Ecosystems** | npm and Python lockfiles, plus Java (Maven/Gradle) and any CycloneDX SBOM |
 |  **Remote auditing** | Audit a GitHub repo without cloning it |
@@ -48,7 +41,7 @@ Osprey is a CLI (`cra`) that builds a Software Bill of Materials (SBOM) from you
 
 ```bash
 git clone https://github.com/Purplelotusec/Osprey
-cd osprey
+cd Osprey
 npm install      # builds automatically via the "prepare" script
 npm link         # optional: installs cra, cra-audit, cra-sbom, cra-kev, cra-report globally
 ```
@@ -62,7 +55,7 @@ cra --path /path/to/your/project
 Audit a GitHub repository:
 
 ```bash
-cra --url facebook/react
+cra --url pypi/warehouse
 ```
 
 Without a global install, prefix commands with `npm run` and separate flags with `--`:
@@ -204,32 +197,39 @@ Checking for vulnerabilities...
 ✓ No active exploitable vulnerabilities detected
 ```
 
-**Findings**
+**Findings** (a project pinned to `jquery 3.4.1`)
 
 ```
 Vulnerability Audit
 ───────────────────
-1281 packages checked
+1 package checked
 ✗ 1 vulnerable package(s)
-✓ 1 safe (patched)
 
 Known Exploited Vulnerabilities
 ───────────────────────────────
 
-1. CVE-2024-12345
-   Component: vulnerable-package@1.2.3
-   PURL: pkg:npm/vulnerable-package@1.2.3
-   Vulnerability: Remote Code Execution in vulnerable-package
-   Version Status: AFFECTED (1.2.3 is vulnerable)
-   Required Action: Apply mitigations per vendor instructions or discontinue use
+1. CVE-2020-11023
+   Component: jquery@3.4.1
+   PURL: pkg:npm/jquery@3.4.1
+   Vulnerability: JQuery Cross-Site Scripting (XSS) Vulnerability
+   Version Status: AFFECTED (3.4.1 is vulnerable)
+   Product: JQuery (JQuery)
+   Required Action: Apply mitigations per vendor instructions or discontinue use of the product if mitigations are unavailable.
+   Due Date: 2025-02-13
+   Advisories: GHSA-jpcq-cgw6-v4j6
+
    ⚠ REMEDIATION:
-   Current: 1.2.3 → Upgrade to: 1.2.4+
-   Run: npm install vulnerable-package@1.2.4
+   Current: 3.4.1 → Upgrade to: 3.5.0+
+   Run: npm install jquery@3.5.0
+
+Summary
+───────
+Status: FAILED
 ```
 
 ### How matching works
 
-Osprey never matches on names. KEV's free-text vendor and product fields produced false positives that way (for example `@aws-sdk/core` matching "WordPress Core"). Instead, each dependency is looked up in [OSV](https://osv.dev), the CVE IDs from its advisories are collected, and only the CVEs that appear in KEV are reported. Every finding is therefore an exact CVE link for that exact package.
+Each dependency is looked up in [OSV](https://osv.dev), the CVE IDs in its advisories are collected, and only CVEs listed in KEV are reported. A finding is therefore always an exact CVE link for that exact package. KEV identifies software by free-text vendor and product names, which don't map reliably onto package names, so Osprey never matches on names.
 
 ### Version status
 
@@ -255,13 +255,13 @@ cra-kev --sbom sbom.json --result result.json --fail-on-high
 
 The result (`schemaVersion: "1.0"`) includes:
 
-- SBOM component count
+- The SBOM component count, and how many of them could be checked (`checkedComponentCount`)
 - KEV snapshot metadata
-- Full match details
-- Warnings and errors
+- Full match details, each with `versionStatus`, `exploitationStatus`, `advisoryIds` and the suggested `patchedVersion`
+- Warnings (everything that limits coverage) and errors
 - A `status` (and optional `reason`) for each pipeline stage
 
-Version-enriched findings add `identityConfidence`, `versionStatus`, `exploitationStatus`, and `advisoryIds`. Signing and storage stages currently report `skipped` until secure CI credentials and key management are configured. Consumers that only read `status` remain compatible.
+Signing and storage stages report `skipped` unless configured (`cra-sbom --sign` / `--store`). Consumers that only read `status` remain compatible.
 
 ### GitHub Actions reporting (`cra-report`)
 
@@ -308,27 +308,30 @@ Each SARIF finding is attached to the dependency file its package came from (`pa
 ## Development
 
 ```bash
-npm install     # also builds
-npm test        # runs the test suite
+npm install          # installs dependencies and builds (via "prepare")
+npm run build        # compile TypeScript to dist/
+npm test             # run the test suite once
+npm run test:watch   # re-run tests on change
 ```
 
-The tests cover npm/Python SBOM generation, signing round-trips, tamper detection, wrong-key rejection, CVE-based matching, npm/PyPI OSV version evaluation, and reporting.
+The tests cover SBOM generation for every supported lockfile format, CVE-based matching, version evaluation for npm, PyPI and Maven (with expected values taken from Maven's and pip's own implementations), OSV and KEV caching, failure handling, reporting (Markdown, annotations, SARIF), and signing round-trips with tamper detection.
 
-To remove global commands installed with `npm link`:
+To remove the global commands installed with `npm link`:
 
 ```bash
-npm unlink -g <package-name>
+npm unlink -g osprey
 ```
 
 Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `smol-toml` (zero-dependency TOML parser for Python lockfiles), and `@aws-sdk/client-s3`.
 
 ---
 
-## Supported Ecosystems 
+## Supported Ecosystems & Limitations
 
 ### What works today
 
 - **npm:** full `package-lock.json` (v1, v2, v3) parsing, including direct vs. transitive dependencies, scoped packages, and deduplication.
+- **Java (Maven / Gradle):** any build-generated CycloneDX SBOM (see [Audit a Java project](#audit-a-java-maven--gradle-project)), with Maven's own version ordering.
 - **Python:** every major lockfile format, detected in this order of preference:
 
   | File | Tool | Direct dependencies from |
@@ -346,7 +349,7 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `s
   `requirements.txt` handling follows pip's syntax: `-r` includes are followed (with cycle protection), `-c` constraint files are not (they install nothing), and hashes, `\` continuations, extras (`pkg[extra]==`), environment markers and `===` pins are understood. Ranges, wildcards (`==4.*`), direct URL references and editable installs have no exact index version, so they are skipped and reported, never guessed.
 
   Git, URL and local-path packages in any lockfile are skipped and reported as warnings, because they aren't the PyPI release a `pkg:pypi` PURL would claim. The project's own entry (an editable install of itself) is excluded silently.
-- **Mixed projects:** every ecosystem present is audited into one SBOM. A Django or Flask backend with an npm-built frontend gets both its Python and npm dependencies checked, and `cra` prints the coverage (`Ecosystems: npm (989), python (292)`). Use `cra-sbom --ecosystem npm|python` to restrict the SBOM to one. A `package.json` without a `package-lock.json` next to Python dependencies isn't audited (there are no exact versions), and the report says so in a warning.
+- **Mixed projects:** every ecosystem present is audited into one SBOM. A Django or Flask backend with an npm-built frontend gets both its Python and npm dependencies checked, and `cra` prints the coverage (`Ecosystems: npm (989), python (292)`). Use `cra-sbom --ecosystem npm|python` to restrict the SBOM to one. A `package.json` without a `package-lock.json` next to Python dependencies isn't audited (there are no exact versions, or they're in a pnpm/Yarn/Bun lockfile), and a warning says so.
 - **Remote auditing (`--url`):** reads the repository's default branch unless a `/tree/<branch>` is given. It fetches the preferred manifest of each ecosystem: `package-lock.json` for npm, and the Python files above in the same order. `package.json` is used only when no other manifest exists, since it holds ranges and in a Python repo is often just front-end tooling. It also fetches the companion files: `pyproject.toml`, `Pipfile`, `requirements-dev.lock`, and `-r` includes (only within the audited directory, at most 25 files).
 - **Signing:** Ed25519 over DSSE pre-authentication encoding. Changing one byte of a signed SBOM, or verifying with the wrong key, fails verification.
 - **KEV polling:** Zod schema validation plus local caching, so a network failure can't silently report "no vulnerabilities". An empty feed counts as a failure. The cache is written atomically and validated when read, so a truncated, edited or foreign cache file fails the run with a clear message instead of shrinking what gets checked.
@@ -356,13 +359,9 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `s
 
 ### Known limitations
 
-- **Lockfile coverage:** no `yarn.lock`, `pnpm-lock.yaml`, `go.sum`, or `Cargo.lock` support yet. Conda environments (`conda-lock.yml`, `pixi.lock`) aren't read, since they lock conda packages rather than PyPI releases. `pyproject.toml` alone (without a lockfile) isn't used for versions, since it only declares ranges.
+- **Lockfile coverage:** `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `go.sum` and `Cargo.lock` aren't read yet. A project using one is never passed silently: a warning or error says its dependencies weren't audited from that lockfile. A CycloneDX SBOM from that ecosystem's own tooling can be checked with `cra-kev --sbom` today, though components outside npm, PyPI and Maven are listed as not covered. Conda environments (`conda-lock.yml`, `pixi.lock`) lock conda packages rather than PyPI releases and aren't read. `pyproject.toml` alone isn't used for versions, since it only declares ranges.
+- **Python `requirements/` directories:** only a root `requirements.txt` (and the files it includes with `-r`) is detected. For projects that keep their pins only under `requirements/*.txt`, a root `requirements.txt` containing `-r requirements/prod.txt` (and so on) makes them visible.
 - **Remote named PEP 751 lockfiles:** `--url` only finds `pylock.toml`, because named variants (`pylock.dev.toml`) can't be discovered without listing the directory. Local audits read all of them.
-- **Matching depends on OSV:** a KEV CVE is found only when an OSV advisory links it to the package. KEV entries for software that isn't distributed as an npm, PyPI or Maven package (operating systems, appliances) can't match, which is expected.
-- **Java dependency resolution:** Osprey reads Java dependencies from a build-generated CycloneDX SBOM, not from `pom.xml`. Libraries shaded or bundled inside other JARs don't appear in the dependency tree, so they aren't covered.
-- **Local-key signing:** Ed25519 with local keys, not Sigstore keyless or a transparency log. The envelope shape stays the same if you upgrade to cosign later.
-- **KEV feed verification:** the poller was verified end-to-end against a synthetic snapshot matching the real response shape. Confirm behavior against the live CISA feed in your own environment.
-
----
-
-
+- **Matching depends on OSV:** a KEV CVE is found only when an OSV advisory links it to the package. KEV entries for software that isn't distributed as an npm, PyPI or Maven package (operating systems, appliances) can't match.
+- **Java dependency resolution:** Java dependencies come from a build-generated CycloneDX SBOM, not from `pom.xml`. Libraries shaded or bundled inside other JARs don't appear in the dependency tree, so they aren't covered.
+- **Local-key signing:** Ed25519 with local keys, not Sigstore keyless or a transparency log. The envelope shape stays the same if you move to cosign later.

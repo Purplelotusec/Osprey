@@ -1,4 +1,4 @@
-const DEFAULT_TIMEOUT_MS = 30_000; // Increased from 15s to 30s for large API responses
+const DEFAULT_TIMEOUT_MS = 30_000; // generous: OSV batch responses and large lockfiles can be slow
 const DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
 
 export interface BoundedFetchOptions {
@@ -79,12 +79,12 @@ export async function fetchJson(
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
-      // Don't retry on 4xx errors (client errors)
+      // A 4xx (bad request, not found, auth) won't change on retry.
       if (lastError instanceof HttpError && lastError.status >= 400 && lastError.status < 500) {
         throw lastError;
       }
 
-      // Retry on network errors, timeouts, 5xx errors
+      // Network errors, timeouts and 5xx responses are often transient.
       if (attempt < retries) {
         await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
         continue;
