@@ -48,7 +48,7 @@ describe("local mixed npm + Python projects", () => {
   });
 
   it("rejects an unknown --ecosystem instead of silently auditing nothing", () => {
-    expect(() => generateSbom({ projectDir: mixedProject(), ecosystem: "cargo" as never })).toThrow(/Unsupported ecosystem "cargo"/);
+    expect(() => generateSbom({ projectDir: mixedProject(), ecosystem: "golang" as never })).toThrow(/Unsupported ecosystem "golang"/);
   });
 
   it("single-ecosystem projects are unchanged", () => {
@@ -113,7 +113,7 @@ describe("remote (--url) mixed repositories", () => {
 
   it("reports every supported file when nothing is found", async () => {
     stubGitHub({});
-    await expect(detectAndFetchPackageFiles(repo)).rejects.toThrow(/package-lock\.json, pnpm-lock\.yaml, yarn\.lock, bun\.lock, uv\.lock, .*requirements\.txt, gradle\.lockfile, package\.json/);
+    await expect(detectAndFetchPackageFiles(repo)).rejects.toThrow(/package-lock\.json, pnpm-lock\.yaml, yarn\.lock, bun\.lock, uv\.lock, .*requirements\.txt, gradle\.lockfile, Cargo\.lock, package\.json/);
   });
 });
 

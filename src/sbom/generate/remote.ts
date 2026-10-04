@@ -3,8 +3,9 @@ import { dirname, join, posix } from "node:path";
 import { tmpdir } from "node:os";
 import { generateSbom, unauditedPackageJsonWarning, UNSUPPORTED_JS_LOCKFILES, type GenerateResult } from "./index.js";
 import { findRequirementIncludes } from "./requirements.js";
+import { describeUnsupportedEcosystems, unsupportedEcosystemWarnings } from "./unsupported.js";
 import type { GitHubRepoInfo } from "../../network/github.js";
-import { detectAndFetchPackageFiles, fetchOptionalGitHubFile } from "../../network/github.js";
+import { detectAndFetchPackageFiles, fetchOptionalGitHubFile, listGitHubDirectory, NoSupportedPackageFileError } from "../../network/github.js";
 
 export interface RemoteGenerationOptions {
   repoInfo: GitHubRepoInfo;
@@ -15,8 +16,26 @@ export async function generateSbomFromGitHub(options: RemoteGenerationOptions): 
   const { repoInfo, token } = options;
   const { owner, repo, path } = repoInfo;
 
-  // One preferred manifest per ecosystem present (npm and/or Python).
-  const packageFiles = await detectAndFetchPackageFiles(repoInfo, { token });
+  // The root listing tells which unsupported ecosystems (Rust, Go, ...) are present.
+  // It's one GitHub API call, so it is best effort: without it the audit is still
+  // complete for what it covers, and the gap is reported instead.
+  let rootFiles: string[] | undefined;
+  let listingError: string | undefined;
+  try {
+    rootFiles = await listGitHubDirectory(repoInfo, "", { token });
+  } catch (err) {
+    listingError = (err as Error).message;
+  }
+
+  // One preferred manifest per ecosystem present (npm, Python and/or Gradle).
+  let packageFiles;
+  try {
+    packageFiles = await detectAndFetchPackageFiles(repoInfo, { token });
+  } catch (err) {
+    const unsupported = err instanceof NoSupportedPackageFileError && rootFiles ? describeUnsupportedEcosystems(rootFiles) : undefined;
+    if (unsupported) throw new NoSupportedPackageFileError(`${(err as Error).message}. ${unsupported}`);
+    throw err;
+  }
 
   const tempDir = mkdtempSync(join(tmpdir(), "osprey-"));
 
@@ -31,6 +50,12 @@ export async function generateSbomFromGitHub(options: RemoteGenerationOptions): 
       if (packageFile.ecosystem === "npm" && packageFile.fileName !== "package.json") {
         const pkgJson = await fetchOptionalGitHubFile(repoInfo, "package.json", { token });
         if (pkgJson !== undefined) writeFileSync(join(tempDir, "package.json"), pkgJson, "utf-8");
+      }
+
+      // Cargo.toml names the project; the lockfile alone is a complete SBOM.
+      if (packageFile.ecosystem === "cargo") {
+        const manifest = await fetchOptionalGitHubFile(repoInfo, "Cargo.toml", { token });
+        if (manifest !== undefined) writeFileSync(join(tempDir, "Cargo.toml"), manifest, "utf-8");
       }
 
       if (packageFile.ecosystem === "python") {
@@ -61,6 +86,12 @@ export async function generateSbomFromGitHub(options: RemoteGenerationOptions): 
         }
       }
       result.warnings.push(unauditedPackageJsonWarning(otherLockfile));
+    }
+
+    if (rootFiles) {
+      result.warnings.push(...unsupportedEcosystemWarnings(rootFiles, ecosystems));
+    } else {
+      result.warnings.push(`Could not list the repository root to check for dependency files Osprey does not read (Rust, Go, Ruby, PHP, .NET, ...), so any such dependencies were NOT audited: ${listingError}`);
     }
 
     // Label the SBOM with the repository, not the temp directory it was built in.

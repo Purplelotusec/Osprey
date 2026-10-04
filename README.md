@@ -30,7 +30,7 @@ Read the announcement: [Introducing Osprey](https://www.purplelotus.space/blog/i
 |  **KEV detection** | Cross-checks components against CISA's KEV catalog |
 |  **Exact CVE matching** | Links each package to its CVEs through OSV advisories for that exact package, never by name similarity |
 |  **Version intelligence** | Uses [OSV](https://osv.dev) to decide whether your *installed* version is actually affected, comparing versions with each ecosystem's own rules |
-|  **Ecosystems** | JavaScript (npm, pnpm, Yarn, Bun), Python (uv, Poetry, PDM, pylock, Pipenv, Rye, pip) and Java (Gradle lockfiles, Maven/Gradle SBOMs), plus any CycloneDX SBOM |
+|  **Ecosystems** | JavaScript (npm, pnpm, Yarn, Bun), Python (uv, Poetry, PDM, pylock, Pipenv, Rye, pip), Java (Gradle lockfiles, Maven/Gradle SBOMs) and Rust (Cargo), plus any CycloneDX SBOM |
 |  **Remote auditing** | Audit a GitHub repo without cloning it |
 | **SBOM signing** | Ed25519 signatures in a DSSE envelope, with tamper detection |
 
@@ -115,7 +115,7 @@ cra-kev --sbom sbom.json --cache ~/.osprey/kev-cache.json
 cra-kev --sbom sbom.json --offline            # cached KEV and OSV data only, no network
 ```
 
-Any CycloneDX JSON SBOM works. Components in ecosystems Osprey can't check (for example Cargo or Go), or without a version, are listed in a warning as **not covered**, and the report says "M of N packages checked". If none of an SBOM's components can be checked, the audit fails instead of passing.
+Any CycloneDX JSON SBOM works. Components in ecosystems Osprey can't check (for example Go or Ruby), or without a version, are listed in a warning as **not covered**, and the report says "M of N packages checked". If none of an SBOM's components can be checked, the audit fails instead of passing.
 
 ### Audit a Java (Maven / Gradle) project
 
@@ -235,7 +235,7 @@ Each dependency is looked up in [OSV](https://osv.dev), the CVE IDs in its advis
 
 ### Version status
 
-For npm, Python (PyPI) and Maven packages, OSV advisories determine whether your installed version is affected. Each ecosystem's versions are compared with its own rules: semver for npm, PEP 440 for PyPI (`1.0rc1 < 1.0`, `1.0 == 1.0.0`), and Maven's version ordering for Maven. Advisories that cover several version windows are evaluated window by window, and the suggested fix is always the next fixed version above yours, never a downgrade.
+For npm, Python (PyPI), Maven and Rust (crates.io) packages, OSV advisories determine whether your installed version is affected. Each ecosystem's versions are compared with its own rules: semver for npm and crates.io, PEP 440 for PyPI (`1.0rc1 < 1.0`, `1.0 == 1.0.0`), and Maven's version ordering for Maven. Advisories that cover several version windows are evaluated window by window, and the suggested fix is always the next fixed version above yours, never a downgrade.
 
 | `versionStatus` | Meaning |
 |---|---|
@@ -343,6 +343,7 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `s
 
   Every package is recorded at its resolved registry version, transitive dependencies included, with scoped packages and peer-dependency variants handled. Direct dependencies come from `package.json`. Git, URL, file, link and workspace packages aren't registry releases; they're skipped, and reported where relevant. Bun's legacy binary `bun.lockb` can't be read; a warning suggests `bun install --save-text-lockfile`.
 - **Java (Maven / Gradle):** Gradle `gradle.lockfile` files (per module, plus legacy `gradle/dependency-locks/`), and any build-generated CycloneDX SBOM (see [Audit a Java project](#audit-a-java-maven--gradle-project)), all with Maven's own version ordering.
+- **Rust:** `Cargo.lock` (lockfile versions 1 to 4), with crates from both the crates.io git index and the sparse index. The workspace's own crates and path dependencies are part of the project, not releases, so they're left out; git and alternate-registry crates are skipped and listed in a warning. Direct dependencies are the ones the workspace's crates depend on, and the project is named from `Cargo.toml`. Fixes are suggested as `cargo update -p <crate> --precise <version>`.
 - **Python:** every major lockfile format, detected in this order of preference:
 
   | File | Tool | Direct dependencies from |
@@ -361,8 +362,8 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `s
   `requirements.txt` handling follows pip's syntax: `-r` includes are followed (with cycle protection), `-c` constraint files are not (they install nothing), and hashes, `\` continuations, extras (`pkg[extra]==`), environment markers and `===` pins are understood. Ranges, wildcards (`==4.*`), direct URL references and editable installs have no exact index version, so they are skipped and reported, never guessed.
 
   Git, URL and local-path packages in any lockfile are skipped and reported as warnings, because they aren't the PyPI release a `pkg:pypi` PURL would claim. The project's own entry (an editable install of itself) is excluded silently.
-- **Mixed projects:** every ecosystem present is audited into one SBOM. A Django or Flask backend with an npm-built frontend gets both its Python and npm dependencies checked, and `cra` prints the coverage (`Ecosystems: npm (989), python (292)`). Use `cra-sbom --ecosystem npm|python|maven` to restrict the SBOM to one. A `package.json` without any lockfile next to other dependencies isn't audited (it has no exact versions), and a warning says so.
-- **Remote auditing (`--url`):** reads the repository's default branch unless a `/tree/<branch>` is given. It fetches the preferred manifest of each ecosystem, in the same order as local detection. The `requirements/` directory is listed through the GitHub API, and Gradle module lockfiles are found through `settings.gradle(.kts)`. `package.json` is used only when no other manifest exists, since it holds ranges and in a Python repo is often just front-end tooling. It also fetches the companion files: `package.json`, `pyproject.toml`, `Pipfile`, `requirements-dev.lock`, and `-r` includes (only within the audited directory, at most 25 files). Network errors, timeouts, 5xx and 429 responses are retried with exponential backoff, honouring `Retry-After`. A 404 means the file isn't there, and authentication errors fail immediately.
+- **Mixed projects:** every ecosystem present is audited into one SBOM. A Django or Flask backend with an npm-built frontend gets both its Python and npm dependencies checked, and `cra` prints the coverage (`Ecosystems: npm (989), python (292)`). Use `cra-sbom --ecosystem npm|python|maven|cargo` to restrict the SBOM to one. A `package.json` without any lockfile next to other dependencies isn't audited (it has no exact versions), and a warning says so. A Tauri-style app with a pnpm frontend and a Cargo backend gets both halves audited.
+- **Remote auditing (`--url`):** reads the repository's default branch unless a `/tree/<branch>` is given. It fetches the preferred manifest of each ecosystem, in the same order as local detection. The `requirements/` directory is listed through the GitHub API, and Gradle module lockfiles are found through `settings.gradle(.kts)`. `package.json` is used only when no other manifest exists, since it holds ranges and in a Python repo is often just front-end tooling. It also fetches the companion files: `package.json`, `pyproject.toml`, `Pipfile`, `requirements-dev.lock`, `Cargo.toml`, and `-r` includes (only within the audited directory, at most 25 files). Network errors, timeouts, 5xx and 429 responses are retried with exponential backoff, honouring `Retry-After`. A 404 means the file isn't there, and authentication errors fail immediately.
 - **Signing:** Ed25519 over DSSE pre-authentication encoding. Changing one byte of a signed SBOM, or verifying with the wrong key, fails verification.
 - **KEV polling:** Zod schema validation plus local caching, so a network failure can't silently report "no vulnerabilities". An empty feed counts as a failure. The cache is written atomically and validated when read, so a truncated, edited or foreign cache file fails the run with a clear message instead of shrinking what gets checked.
 - **OSV lookups:** OSV is the only link from a package to its CVEs. Results are cached in `~/.osprey/osv-cache.json`, written atomically and validated the same way as the KEV cache. Online runs always fetch fresh data. If OSV is unreachable, the cache is used, with a warning, but only when it covers every package. Otherwise the audit fails ("Audit incomplete", exit code 1) rather than passing with packages unchecked. `--offline` reads only the cache, under the same rule. Whenever cached data is used, the report says how old it is.
@@ -371,8 +372,8 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `s
 
 ### Known limitations
 
-- **Other ecosystems:** Go (`go.sum`) and Rust (`Cargo.lock`) aren't read. Their components in a CycloneDX SBOM are listed as not covered. Conda environments (`conda-lock.yml`, `pixi.lock`) lock conda packages rather than PyPI releases and aren't read. `pyproject.toml` alone isn't used for versions, since it only declares ranges.
+- **Other ecosystems:** Go (`go.sum`) isn't read. When a project contains Go, Ruby, PHP, .NET, Swift, Dart, Elixir, `pom.xml`, an unlocked Gradle build or a `Cargo.toml` without `Cargo.lock`, the audit warns that those dependencies were not audited (`--url` finds them with one GitHub API listing of the repository root). Their components in a CycloneDX SBOM are listed as not covered. Conda environments (`conda-lock.yml`, `pixi.lock`) lock conda packages rather than PyPI releases and aren't read. `pyproject.toml` alone isn't used for versions, since it only declares ranges.
 - **Remote named PEP 751 lockfiles:** `--url` only finds `pylock.toml`, because named variants (`pylock.dev.toml`) can't be discovered without listing the directory. Local audits read all of them.
-- **Matching depends on OSV:** a KEV CVE is found only when an OSV advisory links it to the package. KEV entries for software that isn't distributed as an npm, PyPI or Maven package (operating systems, appliances) can't match.
+- **Matching depends on OSV:** a KEV CVE is found only when an OSV advisory links it to the package. KEV entries for software that isn't distributed as an npm, PyPI, Maven or crates.io package (operating systems, appliances) can't match.
 - **Java dependency resolution:** Java dependencies come from Gradle lockfiles or a build-generated CycloneDX SBOM, not from `pom.xml` or `build.gradle`. Libraries shaded or bundled inside other JARs don't appear in the dependency tree, so they aren't covered.
 - **Local-key signing:** Ed25519 with local keys, not Sigstore keyless or a transparency log. The envelope shape stays the same if you move to cosign later.

@@ -85,7 +85,7 @@ describe("successful lookups are unaffected", () => {
 });
 
 describe("components that cannot be checked (finding B)", () => {
-  const crate: NormalizedComponent = { name: "openssl", version: "0.10.55", purl: "pkg:cargo/openssl@0.10.55" };
+  const crate: NormalizedComponent = { name: "rails", version: "7.0.0", purl: "pkg:gem/rails@7.0.0" };
   const goModule: NormalizedComponent = { name: "net", namespace: "golang.org/x", version: "v0.17.0", purl: "pkg:golang/golang.org/x/net@v0.17.0" };
   const unversioned: NormalizedComponent = { name: "lodash", purl: "pkg:npm/lodash" };
   const anonymous: NormalizedComponent = { name: "mystery" };
@@ -96,7 +96,7 @@ describe("components that cannot be checked (finding B)", () => {
     expect(result.checkedComponentCount).toBe(0);
     expect(result.stages.crossCheck.status).toBe("failed");
     expect(result.errors[0]).toMatch(/None of the 4 components could be checked against KEV/);
-    expect(result.errors[0]).toContain("1 in an unsupported ecosystem (cargo: openssl@0.10.55)");
+    expect(result.errors[0]).toContain("1 in an unsupported ecosystem (gem: rails@7.0.0)");
     expect(result.errors[0]).toContain("1 without a version (lodash)");
   });
 
@@ -106,7 +106,7 @@ describe("components that cannot be checked (finding B)", () => {
     expect(result.sbomComponentCount).toBe(3);
     expect(result.checkedComponentCount).toBe(1);
     expect(result.warnings).toEqual([
-      expect.stringMatching(/^2 of 3 components could not be checked against KEV and are NOT covered by this result: 1 in an unsupported ecosystem \(cargo: openssl@0\.10\.55\); 1 without a version \(lodash\)$/),
+      expect.stringMatching(/^2 of 3 components could not be checked against KEV and are NOT covered by this result: 1 in an unsupported ecosystem \(gem: rails@7\.0\.0\); 1 without a version \(lodash\)$/),
     ]);
   });
 

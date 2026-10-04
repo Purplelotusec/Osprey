@@ -163,6 +163,7 @@ function upgradeHint(finding: SecurityFinding, version: string): string | undefi
   if (pkg?.ecosystem === "npm") return `Run: npm install ${pkg.name}@${version}`;
   if (pkg?.ecosystem === "PyPI") return `Run: pip install ${pkg.name}==${version}`;
   // Maven has no install command: the version is declared in pom.xml (or a parent POM / imported BOM).
+  if (pkg?.ecosystem === "crates.io") return `Run: cargo update -p ${pkg.name} --precise ${version}`;
   if (pkg?.ecosystem === "Maven") return `Update ${pkg.name} to ${version} in pom.xml (or the dependencyManagement / BOM that sets it)`;
   return undefined;
 }

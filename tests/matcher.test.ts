@@ -104,7 +104,7 @@ describe("KEV cross-check matcher (CVE-based)", () => {
   });
 
   it("skips components in ecosystems without OSV lookup support", () => {
-    const crate: NormalizedComponent = { purl: "pkg:cargo/widget@1.0.0", name: "widget", version: "1.0.0" };
+    const crate: NormalizedComponent = { purl: "pkg:gem/widget@1.0.0", name: "widget", version: "1.0.0" };
     const matches = crossCheckWithAdvisories([crate], [kevEntry()], advisoriesFor("widget", [advisory("CVE-2026-00001")]));
     expect(matches).toHaveLength(0);
   });

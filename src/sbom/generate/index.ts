@@ -1,15 +1,17 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { findNpmLockfile, generateFromNpmProject, NPM_LOCKFILES } from "./npm.js";
 import { findGradleLockfiles, generateFromGradleLockfiles } from "./gradle.js";
+import { generateFromCargoLock } from "./cargo.js";
 import { detectPythonManifest, generateFromPythonProject, PYTHON_MANIFESTS, pythonManifestFile } from "./python.js";
+import { describeUnsupportedEcosystems, unsupportedEcosystemWarnings } from "./unsupported.js";
 import type { NormalizedComponent, NormalizedSbom } from "../types.js";
 
 const TOOL_NAME = "osprey-sbom-gen";
 const TOOL_VERSION = "0.1.0";
 
-export const ECOSYSTEMS = ["npm", "python", "maven"] as const;
+export const ECOSYSTEMS = ["npm", "python", "maven", "cargo"] as const;
 export type Ecosystem = (typeof ECOSYSTEMS)[number];
 
 export interface GenerateOptions {
@@ -39,6 +41,7 @@ const GENERATORS: Record<Ecosystem, (projectDir: string) => EcosystemResult> = {
   python: generateFromPythonProject,
   // Gradle dependency locking; Maven builds are covered through CycloneDX SBOMs (cra-kev --sbom).
   maven: generateFromGradleLockfiles,
+  cargo: generateFromCargoLock,
 };
 
 /**
@@ -56,10 +59,11 @@ export function generateSbom(opts: GenerateOptions): GenerateResult {
   const ecosystems = opts.ecosystems ?? (opts.ecosystem ? [opts.ecosystem] : detectEcosystems(opts.projectDir));
   const unlockedPackageJson = existsSync(join(opts.projectDir, "package.json")) && findNpmLockfile(opts.projectDir) === undefined;
   if (ecosystems.length === 0) {
+    const unsupported = describeUnsupportedEcosystems(rootFileNames(opts.projectDir));
     throw new Error(
       unlockedPackageJson
         ? `Found package.json but no lockfile in ${opts.projectDir}, so there are no exact versions to audit. Commit the lockfile your package manager writes (${NPM_LOCKFILES.join(", ")}), or use cra-sbom --ecosystem npm to audit the package.json ranges as lower bounds.`
-        : `Could not detect a supported project type in ${opts.projectDir} — looked for ${NPM_LOCKFILES.join(", ")} (JavaScript), ${PYTHON_MANIFESTS.join(", ")} (Python) and gradle.lockfile (Java). Pass --ecosystem to force one, or check a CycloneDX SBOM with cra-kev --sbom.`
+        : `Could not detect a supported project type in ${opts.projectDir} — looked for ${NPM_LOCKFILES.join(", ")} (JavaScript), ${PYTHON_MANIFESTS.join(", ")} (Python) , gradle.lockfile (Java) and Cargo.lock (Rust). ${unsupported ? `${unsupported} ` : ""}Pass --ecosystem to force one, or check a CycloneDX SBOM with cra-kev --sbom.`
     );
   }
 
@@ -69,6 +73,8 @@ export function generateSbom(opts: GenerateOptions): GenerateResult {
   if (autoDetected && !ecosystems.includes("npm") && unlockedPackageJson) {
     warnings.push(unauditedPackageJsonWarning(UNSUPPORTED_JS_LOCKFILES.find((file) => existsSync(join(opts.projectDir, file)))));
   }
+  // Likewise a Rust or Go part of the project: say what was left out rather than pass quietly.
+  if (autoDetected) warnings.push(...unsupportedEcosystemWarnings(rootFileNames(opts.projectDir), ecosystems));
   // The subject is the first ecosystem's project, in ECOSYSTEMS order, so it is stable.
   const [primary] = results;
 
@@ -105,8 +111,8 @@ export function unauditedPackageJsonWarning(otherLockfile: string | undefined): 
  * type ("npm", "pypi"), as paths relative to projectDir. Lets reports attach a
  * finding to the file a developer would edit.
  */
-export function detectManifestFiles(projectDir: string): Partial<Record<"npm" | "pypi" | "maven", string>> {
-  const files: Partial<Record<"npm" | "pypi" | "maven", string>> = {};
+export function detectManifestFiles(projectDir: string): Partial<Record<"npm" | "pypi" | "maven" | "cargo", string>> {
+  const files: Partial<Record<"npm" | "pypi" | "maven" | "cargo", string>> = {};
   const firstExisting = (candidates: string[]) => candidates.find((file) => existsSync(join(projectDir, file)));
   const npmFile = findNpmLockfile(projectDir) ?? firstExisting(["package.json"]);
   if (npmFile) files.npm = npmFile;
@@ -115,7 +121,18 @@ export function detectManifestFiles(projectDir: string): Partial<Record<"npm" | 
   // JVM components come from a build-generated SBOM; point findings at the build file.
   const jvmFile = firstExisting(["pom.xml"]) ?? findGradleLockfiles(projectDir)[0] ?? firstExisting(["build.gradle.kts", "build.gradle"]);
   if (jvmFile) files.maven = jvmFile;
+  const cargoFile = firstExisting(["Cargo.lock"]);
+  if (cargoFile) files.cargo = cargoFile;
   return files;
+}
+
+/** Names of the files directly in projectDir ([] if it can't be read). */
+function rootFileNames(projectDir: string): string[] {
+  try {
+    return readdirSync(projectDir, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name);
+  } catch {
+    return [];
+  }
 }
 
 /** Every ecosystem with a supported manifest in the directory, in ECOSYSTEMS order. */
@@ -124,6 +141,7 @@ export function detectEcosystems(projectDir: string): Ecosystem[] {
     npm: findNpmLockfile(projectDir) !== undefined,
     python: detectPythonManifest(projectDir) !== undefined,
     maven: findGradleLockfiles(projectDir).length > 0,
+    cargo: existsSync(join(projectDir, "Cargo.lock")),
   };
   return ECOSYSTEMS.filter((ecosystem) => present[ecosystem]);
 }

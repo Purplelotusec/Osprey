@@ -87,7 +87,10 @@ export async function fetchOptionalGitHubFile(
   }
 }
 
-export type RemoteEcosystem = "npm" | "python" | "maven";
+/** No manifest of a supported ecosystem in the repository. */
+export class NoSupportedPackageFileError extends Error {}
+
+export type RemoteEcosystem = "npm" | "python" | "maven" | "cargo";
 
 export interface RemotePackageFile {
   ecosystem: RemoteEcosystem;
@@ -146,6 +149,7 @@ const REMOTE_MANIFESTS: Record<RemoteEcosystem, string[]> = {
   ],
   // Gradle lockfiles live per module; findGradleLockfilesRemote discovers them via settings.gradle(.kts).
   maven: ["gradle.lockfile"],
+  cargo: ["Cargo.lock"],
 };
 
 /** Cap on module lockfiles fetched for one repository. */
@@ -228,7 +232,7 @@ export async function detectAndFetchPackageFiles(
   }
 
   const supported = [...Object.values(REMOTE_MANIFESTS).flat(), "package.json"];
-  throw new Error(
+  throw new NoSupportedPackageFileError(
     `No supported package file found in ${owner}/${repo}${path ? `/${path}` : ""}. ` +
     `Supported files: ${supported.join(", ")}`
   );

@@ -49,7 +49,7 @@ describe("osvPackage", () => {
   });
 
   it("returns undefined for ecosystems OSV lookup does not support yet", () => {
-    expect(osvPackage({ purl: "pkg:cargo/serde@1.0.0", name: "serde" })).toBeUndefined();
+    expect(osvPackage({ purl: "pkg:golang/github.com/gin-gonic/gin@1.9.0", name: "gin" })).toBeUndefined();
     expect(osvPackage({ name: "no-identity" })).toBeUndefined();
   });
 

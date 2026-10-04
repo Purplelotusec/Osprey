@@ -78,7 +78,8 @@ describe("versionSchemeFor", () => {
     expect(versionSchemeFor("npm")).toBe(semverScheme);
     expect(versionSchemeFor("PyPI")).toBe(pep440Scheme);
     expect(versionSchemeFor("Maven")).toBe(mavenScheme);
-    expect(versionSchemeFor("crates.io")).toBeUndefined();
+    expect(versionSchemeFor("crates.io")).toBe(semverScheme);
+    expect(versionSchemeFor("Go")).toBeUndefined();
   });
 });
 

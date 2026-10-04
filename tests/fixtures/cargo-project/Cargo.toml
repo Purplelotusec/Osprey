@@ -1,0 +1,10 @@
+[package]
+name = "cargo-kev-demo"
+version = "0.3.1"
+edition = "2021"
+
+[dependencies]
+regex = "1.5"
+serde = "1.0"
+tokio-tungstenite = { git = "https://github.com/snapview/tokio-tungstenite" }
+local-util = { path = "crates/local-util" }
