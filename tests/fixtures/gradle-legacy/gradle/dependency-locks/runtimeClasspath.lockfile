@@ -1,0 +1,3 @@
+# Legacy per-configuration lockfile (Gradle < 6.8)
+com.fasterxml.jackson.core:jackson-databind:2.9.10.7
+org.yaml:snakeyaml:1.26

@@ -160,6 +160,7 @@ describe("Python manifest detection order", () => {
       "Pipfile.lock",
       "requirements.lock",
       "requirements.txt",
+      "requirements/",
     ]);
   });
 
@@ -190,5 +191,23 @@ describe("Python manifest detection order", () => {
     const dir = emptyDir();
     cpSync(join(fixture("pylock-project"), "pylock.docs.toml"), join(dir, "pylock.docs.toml"));
     expect(detectPythonManifest(dir)).toBe("pylock.toml");
+  });
+});
+
+describe("requirements/ directory convention", () => {
+  const project = fixture("requirements-dir-project");
+
+  it("reads every pinned requirements/*.txt (not the *.in inputs) when there's no root requirements.txt", () => {
+    expect(detectPythonManifest(project)).toBe("requirements/");
+    const { sbom, warnings } = generateSbom({ projectDir: project });
+    expect(pins(sbom.components)).toEqual(["django@4.2.11", "pytest@8.3.3", "requests@2.31.0"]);
+    expect(warnings).toEqual([expect.stringContaining("internal_tool-1.0-py3-none-any.whl (direct URL reference)")]);
+  });
+
+  it("prefers a root requirements.txt when both exist", () => {
+    const dir = emptyDir();
+    cpSync(project, dir, { recursive: true });
+    writeFileSync(join(dir, "requirements.txt"), "flask==3.0.3\n");
+    expect(detectPythonManifest(dir)).toBe("requirements.txt");
   });
 });

@@ -30,7 +30,7 @@ Read the announcement: [Introducing Osprey](https://www.purplelotus.space/blog/i
 |  **KEV detection** | Cross-checks components against CISA's KEV catalog |
 |  **Exact CVE matching** | Links each package to its CVEs through OSV advisories for that exact package, never by name similarity |
 |  **Version intelligence** | Uses [OSV](https://osv.dev) to decide whether your *installed* version is actually affected, comparing versions with each ecosystem's own rules |
-|  **Ecosystems** | npm and Python lockfiles, plus Java (Maven/Gradle) and any CycloneDX SBOM |
+|  **Ecosystems** | JavaScript (npm, pnpm, Yarn, Bun), Python (uv, Poetry, PDM, pylock, Pipenv, Rye, pip) and Java (Gradle lockfiles, Maven/Gradle SBOMs), plus any CycloneDX SBOM |
 |  **Remote auditing** | Audit a GitHub repo without cloning it |
 | **SBOM signing** | Ed25519 signatures in a DSSE envelope, with tamper detection |
 
@@ -119,7 +119,9 @@ Any CycloneDX JSON SBOM works. Components in ecosystems Osprey can't check (for 
 
 ### Audit a Java (Maven / Gradle) project
 
-Maven has no lockfile, and only the build tool can resolve the real dependency tree (parent POMs, BOMs, properties, version mediation). Let the build produce a CycloneDX SBOM, then check it:
+Gradle projects that use [dependency locking](https://docs.gradle.org/current/userguide/dependency_locking.html) are audited directly: `cra --path .` or `cra --url owner/repo` reads `gradle.lockfile` at the root and in every module listed in `settings.gradle(.kts)`, as well as the older `gradle/dependency-locks/*.lockfile` files.
+
+Maven has no lockfile, and only the build tool can resolve the real dependency tree (parent POMs, BOMs, properties, version mediation). For Maven, and for Gradle builds without locking, let the build produce a CycloneDX SBOM, then check it:
 
 ```bash
 # Maven
@@ -322,7 +324,7 @@ To remove the global commands installed with `npm link`:
 npm unlink -g osprey
 ```
 
-Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `smol-toml` (zero-dependency TOML parser for Python lockfiles), and `@aws-sdk/client-s3`.
+Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `smol-toml` and `yaml` (zero-dependency parsers for TOML and YAML lockfiles), and `@aws-sdk/client-s3`.
 
 ---
 
@@ -330,8 +332,17 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `s
 
 ### What works today
 
-- **npm:** full `package-lock.json` (v1, v2, v3) parsing, including direct vs. transitive dependencies, scoped packages, and deduplication.
-- **Java (Maven / Gradle):** any build-generated CycloneDX SBOM (see [Audit a Java project](#audit-a-java-maven--gradle-project)), with Maven's own version ordering.
+- **JavaScript:** the lockfile of every major package manager, detected in this order:
+
+  | File | Tool |
+  |---|---|
+  | `npm-shrinkwrap.json`, `package-lock.json` (v1, v2, v3) | npm |
+  | `pnpm-lock.yaml` (lockfile versions 5, 6 and 9, including pnpm 10's multi-document files) | pnpm |
+  | `yarn.lock` (classic v1 and Berry v2+) | Yarn |
+  | `bun.lock` | Bun |
+
+  Every package is recorded at its resolved registry version, transitive dependencies included, with scoped packages and peer-dependency variants handled. Direct dependencies come from `package.json`. Git, URL, file, link and workspace packages aren't registry releases; they're skipped, and reported where relevant. Bun's legacy binary `bun.lockb` can't be read; a warning suggests `bun install --save-text-lockfile`.
+- **Java (Maven / Gradle):** Gradle `gradle.lockfile` files (per module, plus legacy `gradle/dependency-locks/`), and any build-generated CycloneDX SBOM (see [Audit a Java project](#audit-a-java-maven--gradle-project)), all with Maven's own version ordering.
 - **Python:** every major lockfile format, detected in this order of preference:
 
   | File | Tool | Direct dependencies from |
@@ -343,14 +354,15 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `s
   | `Pipfile.lock` | Pipenv (`default` and `develop`) | `Pipfile` |
   | `requirements.lock`, `requirements-dev.lock` | Rye (read together) | `pyproject.toml` |
   | `requirements.txt` | pip, pip-compile, `uv export`, `pip freeze` | `pyproject.toml`, otherwise every pin |
+  | `requirements/*.txt` (when there's no root `requirements.txt`) | the `requirements/` directory convention, read together | `pyproject.toml`, otherwise every pin |
 
   Every package is recorded at its exact resolved version, transitive dependencies included. `pyproject.toml` covers `[project]`, `[dependency-groups]`, `[tool.poetry]`, and the PDM, uv and Rye dev-dependency tables. If no source of direct dependencies is available, directness is left unknown rather than guessed.
 
   `requirements.txt` handling follows pip's syntax: `-r` includes are followed (with cycle protection), `-c` constraint files are not (they install nothing), and hashes, `\` continuations, extras (`pkg[extra]==`), environment markers and `===` pins are understood. Ranges, wildcards (`==4.*`), direct URL references and editable installs have no exact index version, so they are skipped and reported, never guessed.
 
   Git, URL and local-path packages in any lockfile are skipped and reported as warnings, because they aren't the PyPI release a `pkg:pypi` PURL would claim. The project's own entry (an editable install of itself) is excluded silently.
-- **Mixed projects:** every ecosystem present is audited into one SBOM. A Django or Flask backend with an npm-built frontend gets both its Python and npm dependencies checked, and `cra` prints the coverage (`Ecosystems: npm (989), python (292)`). Use `cra-sbom --ecosystem npm|python` to restrict the SBOM to one. A `package.json` without a `package-lock.json` next to Python dependencies isn't audited (there are no exact versions, or they're in a pnpm/Yarn/Bun lockfile), and a warning says so.
-- **Remote auditing (`--url`):** reads the repository's default branch unless a `/tree/<branch>` is given. It fetches the preferred manifest of each ecosystem: `package-lock.json` for npm, and the Python files above in the same order. `package.json` is used only when no other manifest exists, since it holds ranges and in a Python repo is often just front-end tooling. It also fetches the companion files: `pyproject.toml`, `Pipfile`, `requirements-dev.lock`, and `-r` includes (only within the audited directory, at most 25 files). Network errors, timeouts, 5xx and 429 responses are retried with exponential backoff, honouring `Retry-After`. A 404 means the file isn't there, and authentication errors fail immediately.
+- **Mixed projects:** every ecosystem present is audited into one SBOM. A Django or Flask backend with an npm-built frontend gets both its Python and npm dependencies checked, and `cra` prints the coverage (`Ecosystems: npm (989), python (292)`). Use `cra-sbom --ecosystem npm|python|maven` to restrict the SBOM to one. A `package.json` without any lockfile next to other dependencies isn't audited (it has no exact versions), and a warning says so.
+- **Remote auditing (`--url`):** reads the repository's default branch unless a `/tree/<branch>` is given. It fetches the preferred manifest of each ecosystem, in the same order as local detection. The `requirements/` directory is listed through the GitHub API, and Gradle module lockfiles are found through `settings.gradle(.kts)`. `package.json` is used only when no other manifest exists, since it holds ranges and in a Python repo is often just front-end tooling. It also fetches the companion files: `package.json`, `pyproject.toml`, `Pipfile`, `requirements-dev.lock`, and `-r` includes (only within the audited directory, at most 25 files). Network errors, timeouts, 5xx and 429 responses are retried with exponential backoff, honouring `Retry-After`. A 404 means the file isn't there, and authentication errors fail immediately.
 - **Signing:** Ed25519 over DSSE pre-authentication encoding. Changing one byte of a signed SBOM, or verifying with the wrong key, fails verification.
 - **KEV polling:** Zod schema validation plus local caching, so a network failure can't silently report "no vulnerabilities". An empty feed counts as a failure. The cache is written atomically and validated when read, so a truncated, edited or foreign cache file fails the run with a clear message instead of shrinking what gets checked.
 - **OSV lookups:** OSV is the only link from a package to its CVEs. Results are cached in `~/.osprey/osv-cache.json`, written atomically and validated the same way as the KEV cache. Online runs always fetch fresh data. If OSV is unreachable, the cache is used, with a warning, but only when it covers every package. Otherwise the audit fails ("Audit incomplete", exit code 1) rather than passing with packages unchecked. `--offline` reads only the cache, under the same rule. Whenever cached data is used, the report says how old it is.
@@ -359,9 +371,8 @@ Runtime dependencies are intentionally minimal: `commander`, `zod`, `semver`, `s
 
 ### Known limitations
 
-- **Lockfile coverage:** `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `go.sum` and `Cargo.lock` aren't read yet. A project using one is never passed silently: a warning or error says its dependencies weren't audited from that lockfile. A CycloneDX SBOM from that ecosystem's own tooling can be checked with `cra-kev --sbom` today, though components outside npm, PyPI and Maven are listed as not covered. Conda environments (`conda-lock.yml`, `pixi.lock`) lock conda packages rather than PyPI releases and aren't read. `pyproject.toml` alone isn't used for versions, since it only declares ranges.
-- **Python `requirements/` directories:** only a root `requirements.txt` (and the files it includes with `-r`) is detected. For projects that keep their pins only under `requirements/*.txt`, a root `requirements.txt` containing `-r requirements/prod.txt` (and so on) makes them visible.
+- **Other ecosystems:** Go (`go.sum`) and Rust (`Cargo.lock`) aren't read. Their components in a CycloneDX SBOM are listed as not covered. Conda environments (`conda-lock.yml`, `pixi.lock`) lock conda packages rather than PyPI releases and aren't read. `pyproject.toml` alone isn't used for versions, since it only declares ranges.
 - **Remote named PEP 751 lockfiles:** `--url` only finds `pylock.toml`, because named variants (`pylock.dev.toml`) can't be discovered without listing the directory. Local audits read all of them.
 - **Matching depends on OSV:** a KEV CVE is found only when an OSV advisory links it to the package. KEV entries for software that isn't distributed as an npm, PyPI or Maven package (operating systems, appliances) can't match.
-- **Java dependency resolution:** Java dependencies come from a build-generated CycloneDX SBOM, not from `pom.xml`. Libraries shaded or bundled inside other JARs don't appear in the dependency tree, so they aren't covered.
+- **Java dependency resolution:** Java dependencies come from Gradle lockfiles or a build-generated CycloneDX SBOM, not from `pom.xml` or `build.gradle`. Libraries shaded or bundled inside other JARs don't appear in the dependency tree, so they aren't covered.
 - **Local-key signing:** Ed25519 with local keys, not Sigstore keyless or a transparency log. The envelope shape stays the same if you move to cosign later.

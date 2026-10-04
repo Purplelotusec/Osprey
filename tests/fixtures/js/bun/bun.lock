@@ -1,0 +1,26 @@
+{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "bun-app",
+      "dependencies": {
+        "lodash": "^4.17.21",
+        "react": "^18.2.0",
+      },
+      "devDependencies": {
+        "vite": "^5.0.0",
+      },
+    },
+    "packages/shared": {
+      "name": "shared",
+    },
+  },
+  "packages": {
+    "lodash": ["lodash@4.17.21", "", {}, "sha512-b"],
+    "react": ["react@18.2.0", "", {}, "sha512-c"],
+    "shared": ["shared@workspace:packages/shared"],
+    "vite": ["vite@5.0.6", "", { "dependencies": { "esbuild": "^0.19.3" } }, "sha512-d"],
+    "esbuild": ["esbuild@0.19.8", "", {}, "sha512-e"],
+    "forked-lib": ["forked-lib@github:example/forked-lib#abc123", {}, "example-forked-lib-abc123"],
+  }
+}

@@ -66,7 +66,9 @@ export function parseRequirementsFile(path: string, visited = new Set<string>())
     if (pin) {
       result.entries.push({ name: pin[1], version: pin[2] });
     } else {
-      result.skipped.push(`${requirement} (${requirement.includes("@") ? "direct URL reference" : "no exact == pin"})`);
+      // "name @ https://…" and a bare archive URL both install from a URL, not an index.
+      const isUrl = requirement.includes(" @ ") || URL_SCHEME.test(requirement);
+      result.skipped.push(`${requirement} (${isUrl ? "direct URL reference" : "no exact == pin"})`);
     }
   }
   return result;

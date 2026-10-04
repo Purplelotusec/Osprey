@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { generateFromUvLock } from "./uv.js";
 import { generateFromPoetryLock } from "./poetry.js";
@@ -56,7 +56,25 @@ const MANIFESTS = {
     detect: fileExists("requirements.txt"),
     generate: (dir) => generateFromRequirementsFiles(dir, ["requirements.txt"]),
   },
+  // The requirements/ convention (base.txt, prod.txt, dev.txt, ...), read together.
+  "requirements/": {
+    detect: (dir) => requirementsDirFiles(dir).length > 0,
+    generate: (dir) => generateFromRequirementsFiles(dir, requirementsDirFiles(dir)),
+  },
 } satisfies Record<string, ManifestHandler>;
+
+/**
+ * Pinned requirement files under requirements/, as "requirements/<name>.txt".
+ * Only *.txt: the *.in files next to them are pip-compile inputs (ranges), not pins.
+ */
+export function requirementsDirFiles(projectDir: string): string[] {
+  const dir = join(projectDir, "requirements");
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) return [];
+  return readdirSync(dir)
+    .filter((file) => file.endsWith(".txt") && statSync(join(dir, file)).isFile())
+    .sort()
+    .map((file) => `requirements/${file}`);
+}
 
 export type PythonManifest = keyof typeof MANIFESTS;
 export const PYTHON_MANIFESTS = Object.keys(MANIFESTS) as PythonManifest[];
@@ -74,6 +92,7 @@ export function pythonManifestFile(projectDir: string): string | undefined {
   const manifest = detectPythonManifest(projectDir);
   if (manifest === "pylock.toml") return findPylockFiles(projectDir)[0];
   if (manifest === "requirements.lock") return RYE_LOCKS.find((file) => existsSync(join(projectDir, file)));
+  if (manifest === "requirements/") return requirementsDirFiles(projectDir)[0];
   return manifest;
 }
 

@@ -113,7 +113,7 @@ describe("remote (--url) mixed repositories", () => {
 
   it("reports every supported file when nothing is found", async () => {
     stubGitHub({});
-    await expect(detectAndFetchPackageFiles(repo)).rejects.toThrow(/package-lock\.json, uv\.lock, .*requirements\.txt, package\.json/);
+    await expect(detectAndFetchPackageFiles(repo)).rejects.toThrow(/package-lock\.json, pnpm-lock\.yaml, yarn\.lock, bun\.lock, uv\.lock, .*requirements\.txt, gradle\.lockfile, package\.json/);
   });
 });
 
@@ -165,7 +165,7 @@ describe("a package.json without a lockfile is never skipped silently (finding C
     const dir = mkdtempSync(join(tmpdir(), "osprey-pkgjson-only-"));
     tempDirs.push(dir);
     writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: { express: "^4.18.0" } }));
-    expect(() => generateSbom({ projectDir: dir })).toThrow(/Found package\.json but no package-lock\.json .*npm install --package-lock-only/);
+    expect(() => generateSbom({ projectDir: dir })).toThrow(/Found package\.json but no lockfile .*package-lock\.json, pnpm-lock\.yaml, yarn\.lock, bun\.lock/);
   });
 
   it("warns with --url too, by checking whether the repo has a package.json", async () => {
@@ -181,21 +181,62 @@ describe("a package.json without a lockfile is never skipped silently (finding C
   });
 });
 
-describe("package.json locked by another package manager (finding C, refined on real repos)", () => {
-  it("names the pnpm lockfile instead of advising a package-lock.json", () => {
+describe("JavaScript lockfiles from other package managers", () => {
+  const pnpmLock = "lockfileVersion: '9.0'\npackages:\n  react@18.2.0:\n    resolution: {integrity: sha512-x}\n";
+
+  it("audits a pnpm frontend next to a Python backend (Sentry/Zulip-style repo)", () => {
     const dir = mkdtempSync(join(tmpdir(), "osprey-pnpm-"));
     tempDirs.push(dir);
     cpSync(fixture("uv-project"), dir, { recursive: true });
-    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "frontend" }));
-    writeFileSync(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
-    const { warnings } = generateSbom({ projectDir: dir });
-    expect(warnings).toContain("Found package.json locked by pnpm-lock.yaml, which Osprey can't read yet: its JavaScript dependencies were NOT audited.");
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "frontend", dependencies: { react: "^18.2.0" } }));
+    writeFileSync(join(dir, "pnpm-lock.yaml"), pnpmLock);
+    const { ecosystems, sbom, warnings } = generateSbom({ projectDir: dir });
+    expect(ecosystems).toEqual(["npm", "python"]);
+    expect(sbom.components.filter((c) => c.ecosystem === "npm").map((c) => `${c.name}@${c.version}`)).toEqual(["react@18.2.0"]);
     expect(warnings).not.toContain(UNLOCKED_PACKAGE_JSON_WARNING);
   });
 
-  it("does the same with --url (e.g. a Sentry/Zulip-style repo)", async () => {
-    stubGitHub({ "uv.lock": read("uv-project", "uv.lock"), "package.json": '{"name":"frontend"}', "pnpm-lock.yaml": "lockfileVersion: '9.0'\n" });
-    const { warnings } = await generateSbomFromGitHub({ repoInfo: repo });
-    expect(warnings).toEqual(expect.arrayContaining([expect.stringContaining("locked by pnpm-lock.yaml")]));
+  it("does the same with --url", async () => {
+    stubGitHub({ "uv.lock": read("uv-project", "uv.lock"), "package.json": '{"name":"frontend"}', "pnpm-lock.yaml": pnpmLock });
+    const { ecosystems } = await generateSbomFromGitHub({ repoInfo: repo });
+    expect(ecosystems).toEqual(["npm", "python"]);
+  });
+
+  it("names Bun's binary lockfile, which can't be read", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osprey-bunb-"));
+    tempDirs.push(dir);
+    cpSync(fixture("uv-project"), dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "frontend" }));
+    writeFileSync(join(dir, "bun.lockb"), Buffer.from([0x23, 0x21, 0x2f]));
+    expect(generateSbom({ projectDir: dir }).warnings).toEqual(expect.arrayContaining([expect.stringContaining("bun.lockb, Bun's binary lockfile")]));
+  });
+});
+
+describe("--url with a requirements/ directory", () => {
+  it("lists the directory through the GitHub API and audits every pinned file", async () => {
+    const requested: string[] = [];
+    vi.stubGlobal("fetch", async (input: string | URL) => {
+      const url = String(input);
+      requested.push(url);
+      if (url === "https://api.github.com/repos/owner/repo/contents/requirements") {
+        return Response.json([
+          { name: "base.txt", type: "file" },
+          { name: "base.in", type: "file" },
+          { name: "prod.txt", type: "file" },
+          { name: "legacy", type: "dir" },
+        ]);
+      }
+      const files: Record<string, string> = {
+        "requirements/base.txt": "Django==4.2.11\n",
+        "requirements/prod.txt": "-r base.txt\ngunicorn==22.0.0\n",
+      };
+      const path = url.replace(/^https:\/\/raw\.githubusercontent\.com\/owner\/repo\/HEAD\//, "");
+      return path in files ? new Response(files[path]) : new Response("Not Found", { status: 404, statusText: "Not Found" });
+    });
+
+    const { sbom, ecosystems } = await generateSbomFromGitHub({ repoInfo: repo });
+    expect(ecosystems).toEqual(["python"]);
+    expect(sbom.components.map((c) => `${c.name}@${c.version}`).sort()).toEqual(["django@4.2.11", "gunicorn@22.0.0"]);
+    expect(requested.some((u) => u.endsWith("/requirements/base.in"))).toBe(false);
   });
 });

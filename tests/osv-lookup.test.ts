@@ -1,5 +1,7 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { fetchWithConcurrencyLimit, lookupOsvAdvisories, osvPackageKey } from "../src/vulnerability/osv.js";
+import { runKevCheck } from "../src/vulnerability/check.js";
+import { crossCheckWithAdvisories } from "../src/correlation/matcher.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -114,5 +116,40 @@ describe("OSV batch responses (review findings 1 and 2)", () => {
     let page = 0;
     stubBatch((queries) => ({ results: queries.map(() => ({ vulns: [], next_page_token: `t${++page}` })) }));
     await expect(lookupOsvAdvisories([django])).rejects.toThrow(/more than 50 pages of advisories for django \(PyPI\)/);
+  });
+});
+
+describe("OSV advisories with GIT-only affected entries", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Shape of EEF-CVE-2026-56812: npm and Hex entries plus one that only names commits in a repository.
+  const advisory = {
+    id: "EEF-CVE-2026-56812",
+    aliases: ["CVE-2026-56812"],
+    affected: [
+      { package: { ecosystem: "npm", name: "phoenix" }, ranges: [{ type: "SEMVER", events: [{ introduced: "1.2.0-rc.0" }, { fixed: "1.5.15" }] }] },
+      { ranges: [{ type: "GIT", repo: "https://github.com/phoenixframework/phoenix", events: [{ introduced: "2270aaf" }, { fixed: "7f7b971" }] }] },
+    ],
+  };
+
+  it("accepts the advisory instead of failing the whole lookup", async () => {
+    vi.stubGlobal("fetch", async (input: string | URL) =>
+      String(input).endsWith("/querybatch") ? Response.json({ results: [{ vulns: [{ id: advisory.id }] }] }) : Response.json(advisory)
+    );
+    const { advisories } = await lookupOsvAdvisories([{ ecosystem: "npm", name: "phoenix", version: "1.4.0", purl: "pkg:npm/phoenix@1.4.0" }]);
+    expect(advisories.get(osvPackageKey({ ecosystem: "npm", name: "phoenix" }))?.map((a) => a.id)).toEqual([advisory.id]);
+  });
+
+  it("evaluates the version from the package's own entry, ignoring the GIT-only one", async () => {
+    const result = await runKevCheck({
+      subjectName: "s",
+      failOnHigh: false,
+      generateComponents: () => [{ ecosystem: "npm", name: "phoenix", version: "1.4.0", purl: "pkg:npm/phoenix@1.4.0" }],
+      pollKev: async () => ({ count: 1, fetchedAt: "2026-10-04T00:00:00Z", entries: [{ cveId: "CVE-2026-56812", vendorProject: "Phoenix", product: "Phoenix", vulnerabilityName: "n", dateAdded: "2026-01-01", shortDescription: "s" }] }),
+      lookupAdvisories: async () => ({ advisories: new Map([[osvPackageKey({ ecosystem: "npm", name: "phoenix" }), [advisory]]]), warnings: [] }),
+      crossCheck: crossCheckWithAdvisories,
+      sendAlert: async () => {},
+    });
+    expect(result.matches.map((m) => [m.versionStatus, m.patchedVersion])).toEqual([["affected", "1.5.15"]]);
   });
 });

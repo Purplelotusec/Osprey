@@ -22,17 +22,26 @@ export async function generateSbomFromGitHub(options: RemoteGenerationOptions): 
 
   try {
     for (const packageFile of packageFiles) {
-      writeFileSync(join(tempDir, packageFile.fileName), packageFile.content, "utf-8");
+      const destination = join(tempDir, ...packageFile.fileName.split("/"));
+      mkdirSync(dirname(destination), { recursive: true });
+      writeFileSync(destination, packageFile.content, "utf-8");
 
-      // npm lockfiles are read together with package.json (project name/version).
-      // A missing one surfaces from the npm generator; a failed fetch throws here.
-      if (packageFile.fileName === "package-lock.json") {
+      // JavaScript lockfiles are read together with package.json (project name,
+      // direct dependencies). A failed fetch throws; a missing file is tolerated.
+      if (packageFile.ecosystem === "npm" && packageFile.fileName !== "package.json") {
         const pkgJson = await fetchOptionalGitHubFile(repoInfo, "package.json", { token });
         if (pkgJson !== undefined) writeFileSync(join(tempDir, "package.json"), pkgJson, "utf-8");
       }
 
       if (packageFile.ecosystem === "python") {
         await fetchPythonCompanions(repoInfo, packageFile, tempDir, token);
+      }
+
+      // e.g. the other modules' gradle.lockfile and settings.gradle(.kts), fetched during detection.
+      for (const [extraPath, content] of Object.entries(packageFile.extraFiles ?? {})) {
+        const extraDestination = join(tempDir, ...extraPath.split("/"));
+        mkdirSync(dirname(extraDestination), { recursive: true });
+        writeFileSync(extraDestination, content, "utf-8");
       }
     }
 
@@ -79,13 +88,17 @@ const MAX_INCLUDED_FILES = 25;
  */
 async function fetchPythonCompanions(
   repoInfo: GitHubRepoInfo,
-  manifest: { fileName: string; content: string },
+  manifest: { fileName: string; content: string; relatedFiles?: string[] },
   tempDir: string,
   token: string | undefined
 ): Promise<void> {
   const save = async (fileName: string) => {
     const content = await fetchOptionalGitHubFile(repoInfo, fileName, { token });
-    if (content !== undefined) writeFileSync(join(tempDir, fileName), content, "utf-8");
+    if (content !== undefined) {
+      const destination = join(tempDir, ...fileName.split("/"));
+      mkdirSync(dirname(destination), { recursive: true });
+      writeFileSync(destination, content, "utf-8");
+    }
     return content;
   };
 
@@ -98,7 +111,12 @@ async function fetchPythonCompanions(
     const devLock = await save("requirements-dev.lock");
     if (devLock !== undefined) pipFiles.push({ fileName: "requirements-dev.lock", content: devLock });
   }
-  if (!PIP_FORMAT_FILES.has(manifest.fileName)) return;
+  // The rest of requirements/ (capped like -r includes).
+  for (const fileName of (manifest.relatedFiles ?? []).slice(0, MAX_INCLUDED_FILES)) {
+    const content = await save(fileName);
+    if (content !== undefined) pipFiles.push({ fileName, content });
+  }
+  if (!PIP_FORMAT_FILES.has(manifest.fileName) && !manifest.fileName.startsWith("requirements/")) return;
 
   const fetched = new Set(pipFiles.map((file) => file.fileName));
   const queue = [...pipFiles];

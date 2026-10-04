@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import semver from "semver";
 import { buildPurl } from "../purl.js";
+import { directDependencyNames, parseBunLock, parsePnpmLock, parseYarnLock } from "./js-lockfiles.js";
 import type { NormalizedComponent } from "../types.js";
 
 interface PackageLockV2V3 {
@@ -29,37 +30,53 @@ export interface NpmGenerationResult {
 }
 
 /**
- * Generates a component list from a project directory containing
- * package.json + package-lock.json. Does not run `npm install` — reads
- * only what's already resolved on disk, so it's safe to run in CI without
- * network access or a fresh install step.
- *
- * If package-lock.json is not found, falls back to package.json dependencies
- * (less precise - uses version ranges instead of exact versions).
+ * JavaScript lockfiles in order of preference. npm-shrinkwrap.json comes first
+ * because npm itself gives it precedence over package-lock.json (same format).
+ */
+export const NPM_LOCKFILES = ["npm-shrinkwrap.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock"] as const;
+export type NpmLockfile = (typeof NPM_LOCKFILES)[number];
+
+export function findNpmLockfile(projectDir: string): NpmLockfile | undefined {
+  return NPM_LOCKFILES.find((file) => existsSync(join(projectDir, file)));
+}
+
+const JS_LOCKFILE_PARSERS: Record<Exclude<NpmLockfile, "npm-shrinkwrap.json" | "package-lock.json">, typeof parsePnpmLock> = {
+  "pnpm-lock.yaml": parsePnpmLock,
+  "yarn.lock": parseYarnLock,
+  "bun.lock": parseBunLock,
+};
+
+/**
+ * Generates components for a JavaScript project from whichever lockfile it uses
+ * (npm, pnpm, Yarn or Bun). Reads only what's resolved on disk — no install —
+ * so it's safe to run in CI without network access. Without a lockfile it falls
+ * back to package.json ranges, reported as lower bounds.
  */
 export function generateFromNpmProject(projectDir: string): NpmGenerationResult {
   const pkgJsonPath = join(projectDir, "package.json");
-  const lockPath = join(projectDir, "package-lock.json");
-
-  if (!existsSync(pkgJsonPath)) {
-    throw new Error(`No package.json found at ${pkgJsonPath}`);
-  }
-  const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
+  const pkgJson = existsSync(pkgJsonPath) ? JSON.parse(readFileSync(pkgJsonPath, "utf-8")) : undefined;
+  const subject = { subjectName: pkgJson?.name ?? "unknown-npm-project", subjectVersion: pkgJson?.version };
+  const lockfile = findNpmLockfile(projectDir);
 
   // The lockfile records what is actually installed; package.json only declares ranges.
-  if (existsSync(lockPath)) {
-    const lock: PackageLockV2V3 = JSON.parse(readFileSync(lockPath, "utf-8"));
-    const components: NormalizedComponent[] =
-      lock.lockfileVersion >= 2 && lock.packages ? parseV2V3(lock) : parseV1(lock);
-
-    return {
-      subjectName: pkgJson.name ?? "unknown-npm-project",
-      subjectVersion: pkgJson.version,
-      components,
-      warnings: [],
-    };
+  if (lockfile === "package-lock.json" || lockfile === "npm-shrinkwrap.json") {
+    const lock: PackageLockV2V3 = JSON.parse(readFileSync(join(projectDir, lockfile), "utf-8"));
+    const components = lock.lockfileVersion >= 2 && lock.packages ? parseV2V3(lock) : parseV1(lock);
+    return { ...subject, components, warnings: [] };
+  }
+  if (lockfile) {
+    const { components, skipped } = JS_LOCKFILE_PARSERS[lockfile](join(projectDir, lockfile), directDependencyNames(projectDir));
+    const warnings = skipped.length > 0
+      ? [
+          `Skipped ${skipped.length} ${lockfile} entr${skipped.length === 1 ? "y" : "ies"} not installed from the npm registry: ` +
+            skipped.slice(0, 5).join(", ") +
+            (skipped.length > 5 ? ", ..." : ""),
+        ]
+      : [];
+    return { ...subject, components, warnings };
   }
 
+  if (!pkgJson) throw new Error(`No package.json or JavaScript lockfile found in ${projectDir}`);
   const { components, skipped } = parsePackageJson(pkgJson);
   const warnings = [
     "No package-lock.json: npm versions are the lowest each package.json range allows, not what is installed. Commit a lockfile for exact results.",

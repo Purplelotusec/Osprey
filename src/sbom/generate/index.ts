@@ -1,14 +1,15 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { generateFromNpmProject } from "./npm.js";
+import { findNpmLockfile, generateFromNpmProject, NPM_LOCKFILES } from "./npm.js";
+import { findGradleLockfiles, generateFromGradleLockfiles } from "./gradle.js";
 import { detectPythonManifest, generateFromPythonProject, PYTHON_MANIFESTS, pythonManifestFile } from "./python.js";
 import type { NormalizedComponent, NormalizedSbom } from "../types.js";
 
 const TOOL_NAME = "osprey-sbom-gen";
 const TOOL_VERSION = "0.1.0";
 
-export const ECOSYSTEMS = ["npm", "python"] as const;
+export const ECOSYSTEMS = ["npm", "python", "maven"] as const;
 export type Ecosystem = (typeof ECOSYSTEMS)[number];
 
 export interface GenerateOptions {
@@ -36,6 +37,8 @@ interface EcosystemResult {
 const GENERATORS: Record<Ecosystem, (projectDir: string) => EcosystemResult> = {
   npm: generateFromNpmProject,
   python: generateFromPythonProject,
+  // Gradle dependency locking; Maven builds are covered through CycloneDX SBOMs (cra-kev --sbom).
+  maven: generateFromGradleLockfiles,
 };
 
 /**
@@ -51,12 +54,12 @@ export function generateSbom(opts: GenerateOptions): GenerateResult {
   }
   const autoDetected = opts.ecosystems === undefined && opts.ecosystem === undefined;
   const ecosystems = opts.ecosystems ?? (opts.ecosystem ? [opts.ecosystem] : detectEcosystems(opts.projectDir));
-  const unlockedPackageJson = existsSync(join(opts.projectDir, "package.json")) && !existsSync(join(opts.projectDir, "package-lock.json"));
+  const unlockedPackageJson = existsSync(join(opts.projectDir, "package.json")) && findNpmLockfile(opts.projectDir) === undefined;
   if (ecosystems.length === 0) {
     throw new Error(
       unlockedPackageJson
-        ? `Found package.json but no package-lock.json in ${opts.projectDir}, so there are no exact npm versions to audit. Create a lockfile (npm install --package-lock-only) and commit it, or use cra-sbom --ecosystem npm to audit the package.json ranges as lower bounds.`
-        : `Could not detect a supported project type in ${opts.projectDir} — looked for package-lock.json (npm) and ${PYTHON_MANIFESTS.join(", ")} (Python). Pass --ecosystem to force one, or generate the SBOM from another tool and use the ingestion path instead.`
+        ? `Found package.json but no lockfile in ${opts.projectDir}, so there are no exact versions to audit. Commit the lockfile your package manager writes (${NPM_LOCKFILES.join(", ")}), or use cra-sbom --ecosystem npm to audit the package.json ranges as lower bounds.`
+        : `Could not detect a supported project type in ${opts.projectDir} — looked for ${NPM_LOCKFILES.join(", ")} (JavaScript), ${PYTHON_MANIFESTS.join(", ")} (Python) and gradle.lockfile (Java). Pass --ecosystem to force one, or check a CycloneDX SBOM with cra-kev --sbom.`
     );
   }
 
@@ -85,15 +88,15 @@ export function generateSbom(opts: GenerateOptions): GenerateResult {
 }
 
 export const UNLOCKED_PACKAGE_JSON_WARNING =
-  "Found package.json without package-lock.json: its npm dependencies were NOT audited. Commit a lockfile (npm install --package-lock-only) to include them.";
+  "Found package.json without a lockfile: its JavaScript dependencies were NOT audited. Commit the lockfile your package manager writes (e.g. npm install --package-lock-only) to include them.";
 
-/** Lockfiles of other JavaScript package managers, which Osprey doesn't read yet. */
-export const UNSUPPORTED_JS_LOCKFILES = ["pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb"];
+/** JavaScript lockfiles that can't be read: Bun's legacy binary format. */
+export const UNSUPPORTED_JS_LOCKFILES = ["bun.lockb"];
 
 /** The warning for a package.json Osprey isn't auditing, naming the lockfile actually in use if there is one. */
 export function unauditedPackageJsonWarning(otherLockfile: string | undefined): string {
-  return otherLockfile
-    ? `Found package.json locked by ${otherLockfile}, which Osprey can't read yet: its JavaScript dependencies were NOT audited.`
+  return otherLockfile === "bun.lockb"
+    ? "Found package.json locked by bun.lockb, Bun's binary lockfile, which can't be read: its JavaScript dependencies were NOT audited. Run bun install --save-text-lockfile to create bun.lock, which is supported."
     : UNLOCKED_PACKAGE_JSON_WARNING;
 }
 
@@ -105,12 +108,12 @@ export function unauditedPackageJsonWarning(otherLockfile: string | undefined): 
 export function detectManifestFiles(projectDir: string): Partial<Record<"npm" | "pypi" | "maven", string>> {
   const files: Partial<Record<"npm" | "pypi" | "maven", string>> = {};
   const firstExisting = (candidates: string[]) => candidates.find((file) => existsSync(join(projectDir, file)));
-  const npmFile = firstExisting(["package-lock.json", "package.json"]);
+  const npmFile = findNpmLockfile(projectDir) ?? firstExisting(["package.json"]);
   if (npmFile) files.npm = npmFile;
   const pythonFile = pythonManifestFile(projectDir);
   if (pythonFile) files.pypi = pythonFile;
   // JVM components come from a build-generated SBOM; point findings at the build file.
-  const jvmFile = firstExisting(["pom.xml", "gradle.lockfile", "build.gradle.kts", "build.gradle"]);
+  const jvmFile = firstExisting(["pom.xml"]) ?? findGradleLockfiles(projectDir)[0] ?? firstExisting(["build.gradle.kts", "build.gradle"]);
   if (jvmFile) files.maven = jvmFile;
   return files;
 }
@@ -118,8 +121,9 @@ export function detectManifestFiles(projectDir: string): Partial<Record<"npm" | 
 /** Every ecosystem with a supported manifest in the directory, in ECOSYSTEMS order. */
 export function detectEcosystems(projectDir: string): Ecosystem[] {
   const present: Record<Ecosystem, boolean> = {
-    npm: existsSync(join(projectDir, "package-lock.json")),
+    npm: findNpmLockfile(projectDir) !== undefined,
     python: detectPythonManifest(projectDir) !== undefined,
+    maven: findGradleLockfiles(projectDir).length > 0,
   };
   return ECOSYSTEMS.filter((ecosystem) => present[ecosystem]);
 }

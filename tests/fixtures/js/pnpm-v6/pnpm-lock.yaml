@@ -1,0 +1,32 @@
+lockfileVersion: '6.0'
+
+dependencies:
+  lodash:
+    specifier: ^4.17.21
+    version: 4.17.21
+  react:
+    specifier: ^18.2.0
+    version: 18.2.0
+
+devDependencies:
+  vite:
+    specifier: ^5.0.0
+    version: 5.0.6(@types/node@20.10.4)
+
+packages:
+
+  /@types/node@20.10.4:
+    resolution: {integrity: sha512-a}
+    dev: true
+
+  /lodash@4.17.21:
+    resolution: {integrity: sha512-b}
+    dev: false
+
+  /react@18.2.0:
+    resolution: {integrity: sha512-c}
+    dev: false
+
+  /vite@5.0.6(@types/node@20.10.4):
+    resolution: {integrity: sha512-d}
+    dev: true
